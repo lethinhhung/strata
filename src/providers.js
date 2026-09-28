@@ -84,7 +84,7 @@ function parseOpenCodeOutput(stdout) {
       if (event.part?.text) parts.push(event.part.text);
       else if (event.text) parts.push(event.text);
       else if (event.type === 'text' && event.content) parts.push(event.content);
-    } catch { return stdout.trim(); }
+    } catch { /* Ignore non-JSON CLI diagnostics and keep parsing event lines. */ }
   }
   return parts.length ? parts.join('\n') : stdout.trim();
 }
