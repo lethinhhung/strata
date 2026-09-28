@@ -39,7 +39,7 @@ export async function runStageWithRepairs(repo: string, record: any, stage: any,
   throw new RunError(`Stage ${stage.id} halted: ${stage.failure}`);
 }
 
-function repairIsTestOnly(context: unknown) {
+export function repairIsTestOnly(context: unknown) {
   let findings: any = context;
   if (typeof context === 'string') {
     try { findings = JSON.parse(context); } catch { findings = context; }
