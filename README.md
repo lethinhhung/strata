@@ -16,6 +16,7 @@ The default model split follows this project’s setup: Codex CLI handles strong
 
 ```sh
 npm install
+npm run build
 npm link
 strata init
 ```
@@ -51,4 +52,6 @@ Memory is advisory, repository-scoped context. Configure its location with `work
 
 ## Provider adapters
 
-The built-in adapters invoke `codex exec` and `opencode run` as local processes. Codex CLI runs with workspace-write sandboxing and non-interactive approvals; OpenCode runs from the repository and uses its configured provider/model. Add another provider in `src/providers.js` without changing workflow coordination, state, or gate rules.
+The TypeScript sources live in `src/` and compile to `dist/`. `npm run build` creates the executable at `dist/src/cli.js`; `npm start` and the linked `strata` command use that build. Run `npm test` to compile the TypeScript tests and execute them with Node’s test runner. `npm run typecheck` checks types without emitting files.
+
+The built-in adapters invoke `codex exec` and `opencode run` as local processes. Codex CLI runs with workspace-write sandboxing and non-interactive approvals; OpenCode runs from the repository and uses its configured provider/model. Add another provider in `src/providers.ts` without changing workflow coordination, state, or gate rules.

@@ -16,9 +16,21 @@ Usage:
   strata config-example
   strata --version`;
 
-function args(argv) {
-  const positional = [];
-  const options = {};
+interface Args {
+  positional: string[];
+  options: {
+    help?: boolean;
+    version?: boolean;
+    force?: boolean;
+    repo?: string;
+    config?: string;
+    [key: string]: string | boolean | undefined;
+  };
+}
+
+export function args(argv: string[]): Args {
+  const positional: string[] = [];
+  const options: Args['options'] = {};
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === '--help' || token === '-h') options.help = true;
@@ -33,7 +45,7 @@ function args(argv) {
   return { positional, options };
 }
 
-function resolveRun(repo, reference) {
+function resolveRun(repo: string, reference: string): string {
   const candidate = path.resolve(repo, reference);
   if (fs.existsSync(candidate)) return candidate;
   const byId = recordPath(repo, reference);
@@ -41,7 +53,7 @@ function resolveRun(repo, reference) {
   throw new RunError(`Run record not found: ${reference}`);
 }
 
-async function main() {
+async function main(): Promise<number> {
   const { positional, options } = args(process.argv.slice(2));
   if (options.help || positional[0] === 'help') { console.log(usage); return 0; }
   if (options.version) { console.log(`strata ${version}`); return 0; }
