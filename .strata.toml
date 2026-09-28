@@ -1,0 +1,23 @@
+# Model IDs are interpreted by the local CLIs; credentials stay outside this file.
+[models.strong]
+provider = "codex"
+model = "gpt-6-luna"
+command = "codex"
+timeout_seconds = 3600
+extra_args = ["--config", 'model_reasoning_effort="medium"']
+
+[models.worker]
+provider = "opencode"
+model = "nvidia/nvidia/nemotron-3-super-120b-a12b"
+command = "opencode"
+timeout_seconds = 1800
+
+[workflow]
+max_repairs = 2
+checkpoint = true
+checkpoint_prefix = "strata"
+spec_paths = ["specs", "RULES.md", "TYPESCRIPT_REFACTOR_EPIC.md"]
+memory_path = "memory"
+memory_policy = ""
+quality_checks = [["npm", "run", "typecheck"]]
+test_commands = [["npm", "test"]]
