@@ -2,17 +2,25 @@ import { spawn } from 'node:child_process';
 
 export class ProviderError extends Error {}
 
-const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+interface Model {
+  provider: string;
+  model: string;
+  command: string;
+  timeout_seconds: number;
+  extra_args: string[];
+}
 
-function run(command, args, { cwd, timeout }) {
+const sleep = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+function run(command: string, args: string[], { cwd, timeout }: { cwd: string; timeout: number }): Promise<{ code: number | null; signal: NodeJS.Signals | null | undefined; timedOut: boolean; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
-    const stdout = [];
-    const stderr = [];
+    const stdout: Uint8Array[] = [];
+    const stderr: Uint8Array[] = [];
     let timedOut = false;
     let settled = false;
-    let exitTimer;
-    const finish = (code, signal) => {
+    let exitTimer: NodeJS.Timeout;
+    const finish = (code: number | null, signal: NodeJS.Signals | null | undefined) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -24,18 +32,16 @@ function run(command, args, { cwd, timeout }) {
       child.kill('SIGTERM');
       setTimeout(() => child.kill('SIGKILL'), 3000).unref();
     }, timeout);
-    child.stdout.on('data', (chunk) => stdout.push(chunk));
-    child.stderr.on('data', (chunk) => stderr.push(chunk));
-    child.on('error', (error) => {
+    child.stdout.on('data', (chunk: Uint8Array) => stdout.push(chunk));
+    child.stderr.on('data', (chunk: Uint8Array) => stderr.push(chunk));
+    child.on('error', (error: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       clearTimeout(exitTimer);
       reject(error);
     });
-    child.on('exit', (code, signal) => {
-      // Some CLI wrappers leave a descendant holding inherited output pipes.
-      // Do not let that keep a completed provider call pending forever.
+    child.on('exit', (code: number | null, signal: NodeJS.Signals | null | undefined) => {
       exitTimer = setTimeout(() => {
         child.stdout.destroy();
         child.stderr.destroy();
@@ -46,8 +52,8 @@ function run(command, args, { cwd, timeout }) {
   });
 }
 
-export async function invoke(model, prompt, cwd, role, { skipGitRepoCheck = false } = {}) {
-  let args;
+export async function invoke(model: Model, prompt: string, cwd: string, role: string, { skipGitRepoCheck = false } = {}): Promise<string> {
+  let args: string[];
   const provider = model.provider.toLowerCase();
   if (provider === 'codex') {
     args = ['exec', '--json', '--cd', cwd, '--sandbox', 'workspace-write', '--config', 'approval_policy="never"'];
@@ -61,13 +67,15 @@ export async function invoke(model, prompt, cwd, role, { skipGitRepoCheck = fals
   } else {
     throw new ProviderError(`Unsupported CLI provider ${model.provider}; use codex or opencode`);
   }
-  let result;
+  let result: { code: number | null; signal: NodeJS.Signals | null | undefined; timedOut: boolean; stdout: string; stderr: string } = {
+    code: 1, signal: null, timedOut: false, stdout: '', stderr: '',
+  };
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       result = await run(model.command, args, { cwd, timeout: model.timeout_seconds * 1000 });
     } catch (error) {
-      if (error.code === 'ENOENT') throw new ProviderError(`Cannot find \`${model.command}\` for ${role}`);
-      throw new ProviderError(`${role} process failed: ${error.message}`);
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') throw new ProviderError(`Cannot find \`${model.command}\` for ${role}`);
+      throw new ProviderError(`${role} process failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (result.code === 0 && !result.timedOut) break;
     const failure = `${result.stderr}\n${result.stdout}`;
@@ -84,8 +92,8 @@ export async function invoke(model, prompt, cwd, role, { skipGitRepoCheck = fals
   return provider === 'codex' ? parseCodexOutput(result.stdout) : parseOpenCodeOutput(result.stdout);
 }
 
-function parseCodexOutput(stdout) {
-  const messages = [];
+function parseCodexOutput(stdout: string): string {
+  const messages: string[] = [];
   for (const line of stdout.split(/\r?\n/)) {
     try {
       const event = JSON.parse(line);
@@ -96,9 +104,9 @@ function parseCodexOutput(stdout) {
   return messages.at(-1) ?? stdout.trim();
 }
 
-function parseOpenCodeOutput(stdout) {
+function parseOpenCodeOutput(stdout: string): string {
   const lines = stdout.trim().split(/\r?\n/);
-  const parts = [];
+  const parts: string[] = [];
   for (const line of lines) {
     try {
       const event = JSON.parse(line);
