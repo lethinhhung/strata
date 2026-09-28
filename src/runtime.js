@@ -162,7 +162,8 @@ function parseObject(text, role) {
     const object = JSON.parse(candidate);
     if (object && typeof object === 'object' && !Array.isArray(object)) return object;
   } catch { /* Report a stable structured-output error. */ }
-  throw new RunError(`${role} did not return a JSON object`);
+  const preview = value.replace(/\s+/g, ' ').slice(0, 500);
+  throw new RunError(`${role} did not return a JSON object${preview ? ` (response began: ${preview})` : ' (response was empty)'}`);
 }
 
 async function ask(config, role, task, context, { strong = false, skipGitRepoCheck = false } = {}) {
@@ -281,8 +282,11 @@ function runChecks(repo, commands, kind) {
   });
 }
 
-function reviewDiff(repo, files) {
+function reviewDiff(repo, files, checkpointCommit = null) {
   const tracked = git(repo, ['diff', 'HEAD', '--', ...files]).stdout;
+  const checkpointed = checkpointCommit
+    ? git(repo, ['show', '--format=', checkpointCommit, '--', ...files]).stdout
+    : '';
   const untracked = git(repo, ['ls-files', '--others', '--exclude-standard', '-z']).stdout
     .split('\0').filter((file) => file && files.includes(file));
   const additions = untracked.map((file) => {
@@ -291,7 +295,7 @@ function reviewDiff(repo, files) {
     catch { content = '[binary or unreadable file]'; }
     return `\n--- /dev/null\n+++ b/${file}\n${content.split('\n').map((line) => `+${line}`).join('\n')}\n`;
   }).join('\n');
-  return `${tracked}\n${additions}`;
+  return `${tracked}\n${checkpointed}\n${additions}`;
 }
 
 function addPhase(stage, phase, result, extra = {}) {
@@ -317,7 +321,7 @@ async function runStage(repo, record, stage, config, file, { repairContext = '' 
   const coordination = await askReadOnly(config, 'Stage Coordinator', {
     repo,
     shape: '{"implementation_task":"...","review_focus":[...],"test_task":"...","validation_requirements":[...],"memory_handoff":"..."}',
-    text: `Coordinate this stage with a fresh context. Do not implement. Convert the contract into bounded work for the implementer, reviewer, tester, and validator; select only relevant memory and record the handoff. Include prior phase results and any repair findings.\nCONTRACT:\n${json(stageContract(stage))}\nEXPLORE FINDINGS:\n${json(exploration)}\nMEMORY:\n${record.memory_consulted.excerpt}\nPRIOR RESULTS:\n${json(stage.phase_results)}\nREPAIR FINDINGS:\n${repairContext}`,
+    text: `Coordinate this stage with a fresh context. Do not implement. Convert the contract into bounded work for the implementer, reviewer, tester, and validator; select only relevant memory and record the handoff. Assign production source files to the Implement Agent and test files to the Test Agent. The Implement Agent must never be tasked with editing tests, and the Test Agent must never be tasked with editing production source. When repairing a failed test gate, assign the test expectation or coverage repair to the Test Agent. Include prior phase results and any repair findings.\nCONTRACT:\n${json(stageContract(stage))}\nEXPLORE FINDINGS:\n${json(exploration)}\nMEMORY:\n${record.memory_consulted.excerpt}\nPRIOR RESULTS:\n${json(stage.phase_results)}\nREPAIR FINDINGS:\n${repairContext}`,
   }, specContext, { strong: true });
   addPhase(stage, 'stage_coordination', coordination);
   save(record, file);
@@ -325,13 +329,28 @@ async function runStage(repo, record, stage, config, file, { repairContext = '' 
   const beforeImplement = runSnapshot(repo, record, file);
   const implementationAttempt = await askScoped(config, 'Implement Agent', {
     repo,
-    text: `Implement the source change within this stage scope. Do not edit tests, specs, memory, run records, or unrelated files. Return observed changed paths and checks. If this is a repair, fix only the reported findings.\nCONTRACT:\n${json(stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.implementation_task}\nREPAIR FINDINGS:\n${repairContext}`,
+    text: `Implement the source change within this stage scope. Edit production source files only. Do not edit tests, specs, memory, run records, or unrelated files, even if the coordinator task asks for test edits; those belong to the Test Agent. Return observed changed paths and checks. If this is a repair, fix only the reported source findings.\nCONTRACT:\n${json(stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.implementation_task}\nREPAIR FINDINGS:\n${repairContext}`,
   }, specContext, {
     allowedPath: (filePath) => !isTestPath(filePath) && !filePath.startsWith('specs/') &&
       filePath !== record.epic_path && inScope(filePath, stage.scope),
   });
   const implementation = implementationAttempt.result;
   const implementChanges = changes(beforeImplement, runSnapshot(repo, record, file));
+  // A repair attempt can start with source edits retained from an earlier attempt.
+  // Treat those in-scope edits as the implementation for this pass when the
+  // Implement Agent correctly makes no further source changes.
+  const retainedSourceChanges = [...runSnapshot(repo, record, file).keys()]
+    .filter((filePath) => !isTestPath(filePath) && !filePath.startsWith('specs/') &&
+      filePath !== record.epic_path && inScope(filePath, stage.scope));
+  if (stage.checkpoint_commit) {
+    const checkpointedPaths = git(repo, ['show', '--format=', '--name-only', stage.checkpoint_commit]).stdout
+      .split('\n').map((filePath) => filePath.trim()).filter(Boolean)
+      .filter((filePath) => !isTestPath(filePath) && !filePath.startsWith('specs/') &&
+        filePath !== record.epic_path && inScope(filePath, stage.scope));
+    retainedSourceChanges.push(...checkpointedPaths);
+  }
+  const uniqueRetainedSourceChanges = [...new Set(retainedSourceChanges)].sort();
+  const effectiveImplementChanges = implementChanges.length ? implementChanges : uniqueRetainedSourceChanges;
   addPhase(stage, 'implement', implementation, {
     observed_changed_paths: implementChanges,
     attempted_changed_paths: implementationAttempt.attempted,
@@ -341,7 +360,7 @@ async function runStage(repo, record, stage, config, file, { repairContext = '' 
     isTestPath(filePath) || filePath.startsWith('specs/') || filePath === record.epic_path || !inScope(filePath, stage.scope));
   save(record, file);
   if (implementationViolations.length) throw new RunError(`Implementer changed files outside its source scope: ${implementationViolations.join(', ')}`);
-  if (implementation.status !== 'pass' || !implementChanges.length) {
+  if (implementation.status !== 'pass' || !effectiveImplementChanges.length) {
     const discarded = implementationAttempt.discarded.length
       ? `; discarded out-of-role writes: ${implementationAttempt.discarded.join(', ')}` : '';
     return { passed: false, reason: `Implementation failed or produced no in-scope source changes${discarded}`, findings: implementation.findings ?? [] };
@@ -350,7 +369,7 @@ async function runStage(repo, record, stage, config, file, { repairContext = '' 
   const beforeReview = runSnapshot(repo, record, file);
   const review = await askReadOnly(config, 'Review Agent', {
     repo,
-    text: `Review the full diff read-only against the stage contract, specs, and repo rules. Pass only with no critical or major issue. Do not edit files.\nCONTRACT:\n${json(stageContract(stage))}\nREVIEW FOCUS:\n${json(coordination.review_focus ?? [])}\nDiff:\n${reviewDiff(repo, implementChanges)}`,
+    text: `Review only the production-source diff read-only against the stage contract, specs, and repo rules. Pass only with no critical or major issue in the source change. The Test Agent runs after this review and owns all test-file edits; do not fail review because required tests have not yet been added or updated. Do not edit files.\nCONTRACT:\n${json(stageContract(stage))}\nREVIEW FOCUS:\n${json(coordination.review_focus ?? [])}\nProduction-source diff:\n${reviewDiff(repo, effectiveImplementChanges, stage.checkpoint_commit)}`,
   }, specContext);
   const reviewMutations = changes(beforeReview, runSnapshot(repo, record, file));
   addPhase(stage, 'review', review, { observed_changed_paths: reviewMutations });
@@ -406,15 +425,18 @@ function checkpoint(repo, stage, config, record, file, attempt) {
   const changed = changes(new Map(), runSnapshot(repo, record, file));
   const eligible = changed.filter((filePath) => !filePath.startsWith('specs/') && !filePath.startsWith('docs/temps/'));
   if (config.workflow.checkpoint) {
-    if (!eligible.length) throw new RunError(`No files to checkpoint for stage ${stage.id}`);
-    const add = git(repo, ['add', '-A', '--', ...eligible], { allowFailure: true });
-    if (add.status !== 0) throw new RunError(add.stderr.trim());
-    const message = `${config.workflow.checkpoint_prefix}: ${stage.id} ${stage.title} [${stage.checkpoint}]${attempt > 1 ? ` repair-${attempt}` : ''}`;
-    const commit = git(repo, ['commit', '-m', message], { allowFailure: true });
-    if (commit.status !== 0) throw new RunError(`Checkpoint failed for ${stage.id}: ${commit.stderr.trim()}`);
-    stage.checkpoint_commit = git(repo, ['rev-parse', 'HEAD']).stdout.trim();
+    if (!eligible.length && !stage.checkpoint_commit) throw new RunError(`No files to checkpoint for stage ${stage.id}`);
+    if (eligible.length) {
+      const add = git(repo, ['add', '-A', '--', ...eligible], { allowFailure: true });
+      if (add.status !== 0) throw new RunError(add.stderr.trim());
+      const message = `${config.workflow.checkpoint_prefix}: ${stage.id} ${stage.title} [${stage.checkpoint}]${attempt > 1 ? ` repair-${attempt}` : ''}`;
+      const commit = git(repo, ['commit', '-m', message], { allowFailure: true });
+      if (commit.status !== 0) throw new RunError(`Checkpoint failed for ${stage.id}: ${commit.stderr.trim()}`);
+      stage.checkpoint_commit = git(repo, ['rev-parse', 'HEAD']).stdout.trim();
+    }
   }
   stage.status = 'complete';
+  delete stage.failure;
   stage.completed_at = now();
   save(record, file);
 }
@@ -455,7 +477,7 @@ async function finalValidation(repo, record, config, file) {
   const review = await askReadOnly(config, 'Epic Coordinator', {
     repo,
     shape: '{"status":"pass|fail","findings":[],"target_stage_id":"optional stage id"}',
-    text: `Review epic criteria, cross-stage consistency, regressions, and architecture. Check only completed work and return a target_stage_id if a targeted stage repair is needed.\nEPIC:\n${record.epic}\nSTAGE RESULTS:\n${json(record.stages)}`,
+    text: `Review epic criteria, cross-stage consistency, regressions, and architecture. Check the latest completed result for each stage. Earlier failed attempts are resolved when followed by a passing attempt and checkpoint; do not treat historical attempts as current failures. The read-only workspace intentionally has no Git metadata, so do not fail because Git diff/status is unavailable. Use recorded observed changed paths, completed phase results, checkpoint identity, and engine check evidence to assess the work. Return a target_stage_id only for a substantive unresolved issue in completed work.\nEPIC:\n${record.epic}\nSTAGE RESULTS:\n${json(record.stages)}`,
   }, context, { strong: true });
   const evidence = [...runChecks(repo, config.workflow.test_commands, 'final_test'), ...runChecks(repo, config.workflow.quality_checks, 'final_quality')];
   const beforeValidator = runSnapshot(repo, record, file);

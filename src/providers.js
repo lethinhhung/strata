@@ -10,6 +10,15 @@ function run(command, args, { cwd, timeout }) {
     const stdout = [];
     const stderr = [];
     let timedOut = false;
+    let settled = false;
+    let exitTimer;
+    const finish = (code, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(exitTimer);
+      resolve({ code, signal, timedOut, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') });
+    };
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill('SIGTERM');
@@ -17,11 +26,23 @@ function run(command, args, { cwd, timeout }) {
     }, timeout);
     child.stdout.on('data', (chunk) => stdout.push(chunk));
     child.stderr.on('data', (chunk) => stderr.push(chunk));
-    child.on('error', (error) => { clearTimeout(timer); reject(error); });
-    child.on('close', (code, signal) => {
+    child.on('error', (error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      resolve({ code, signal, timedOut, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') });
+      clearTimeout(exitTimer);
+      reject(error);
     });
+    child.on('exit', (code, signal) => {
+      // Some CLI wrappers leave a descendant holding inherited output pipes.
+      // Do not let that keep a completed provider call pending forever.
+      exitTimer = setTimeout(() => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        finish(code, signal);
+      }, 1000);
+    });
+    child.on('close', finish);
   });
 }
 
