@@ -25,15 +25,16 @@ function run(command, args, { cwd, timeout }) {
   });
 }
 
-export async function invoke(model, prompt, cwd, role) {
+export async function invoke(model, prompt, cwd, role, { skipGitRepoCheck = false } = {}) {
   let args;
   const provider = model.provider.toLowerCase();
   if (provider === 'codex') {
     args = ['exec', '--json', '--cd', cwd, '--sandbox', 'workspace-write', '--config', 'approval_policy="never"'];
+    if (skipGitRepoCheck) args.push('--skip-git-repo-check');
     if (model.model) args.push('--model', model.model);
     args.push(...model.extra_args, prompt);
   } else if (provider === 'opencode') {
-    args = ['run', '--format', 'json'];
+    args = ['run', '--format', 'json', '--dir', cwd];
     if (model.model) args.push('--model', model.model);
     args.push(...model.extra_args, prompt);
   } else {

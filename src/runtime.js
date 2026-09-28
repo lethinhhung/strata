@@ -1,6 +1,7 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { invoke } from './providers.js';
 
@@ -44,6 +45,68 @@ function runSnapshot(repo, record, file) {
 function changes(before, after) {
   const paths = new Set([...before.keys(), ...after.keys()]);
   return [...paths].filter((file) => before.get(file) !== after.get(file)).sort();
+}
+
+const generatedDirectories = new Set(['.git', 'node_modules', '.expo', '.turbo', 'Pods', '.gradle', 'coverage']);
+
+function copyWorkspace(source, destination) {
+  fs.cpSync(source, destination, {
+    recursive: true,
+    filter(item) {
+      const relative = path.relative(source, item);
+      if (!relative) return true;
+      if (relative.split(path.sep).some((part) => generatedDirectories.has(part))) return false;
+      try { return !fs.lstatSync(item).isSymbolicLink(); }
+      catch { return false; }
+    },
+  });
+}
+
+function workspaceFiles(root) {
+  const files = new Map();
+  function visit(directory) {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      const relative = path.relative(root, full).split(path.sep).join('/');
+      if (entry.isDirectory()) {
+        if (!generatedDirectories.has(entry.name)) visit(full);
+      } else if (entry.isSymbolicLink()) {
+        files.set(relative, 'symlink');
+      } else if (entry.isFile()) {
+        const mode = fs.statSync(full).mode & 0o111;
+        const hash = createHash('sha256').update(fs.readFileSync(full)).digest('hex');
+        files.set(relative, `${mode}:${hash}`);
+      }
+    }
+  }
+  visit(root);
+  return files;
+}
+
+async function askScoped(config, role, task, context, { allowedPath, strong = false } = {}) {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'strata-worker-'));
+  try {
+    copyWorkspace(task.repo, workspace);
+    const before = workspaceFiles(workspace);
+    const result = await ask(config, role, { ...task, repo: workspace }, context, { strong, skipGitRepoCheck: true });
+    const after = workspaceFiles(workspace);
+    const attempted = [...new Set([...before.keys(), ...after.keys()])]
+      .filter((file) => before.get(file) !== after.get(file)).sort();
+    const applied = attempted.filter((file) => allowedPath(file) && after.get(file) !== 'symlink');
+    const discarded = attempted.filter((file) => !allowedPath(file) || after.get(file) === 'symlink');
+    for (const file of applied) {
+      const source = path.join(workspace, file);
+      const target = path.join(task.repo, file);
+      if (after.has(file)) {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(source, target);
+        fs.chmodSync(target, fs.statSync(source).mode & 0o777);
+      } else fs.rmSync(target, { force: true });
+    }
+    return { result, attempted, applied, discarded };
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
 }
 
 function readTree(repo, specPaths, limit = 32_000) {
@@ -102,11 +165,21 @@ function parseObject(text, role) {
   throw new RunError(`${role} did not return a JSON object`);
 }
 
-async function ask(config, role, task, context, { strong = false } = {}) {
+async function ask(config, role, task, context, { strong = false, skipGitRepoCheck = false } = {}) {
   const shape = task.shape ?? '{"status":"pass|fail","summary":"...","findings":[],"changed_paths":[],"commands":[]}';
   const prompt = `You are the Strata ${role}. Follow the supplied Strata specifications and role boundary.\nReturn one JSON object only, matching this shape: ${shape}\n\nTask:\n${task.text}\n\nRepository and supplied context:\n${context}`;
-  const response = await invoke(strong ? config.strong : config.worker, prompt, task.repo, role);
+  const response = await invoke(strong ? config.strong : config.worker, prompt, task.repo, role, { skipGitRepoCheck });
   return parseObject(response, role);
+}
+
+async function askReadOnly(config, role, task, context, options) {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'strata-readonly-'));
+  try {
+    copyWorkspace(task.repo, workspace);
+    return await ask(config, role, { ...task, repo: workspace }, context, { ...options, skipGitRepoCheck: true });
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
 }
 
 function validatePlan(plan) {
@@ -154,10 +227,10 @@ export async function startRun(repo, epicPath, config) {
   };
   save(record, file);
   try {
-    const plan = await ask(config, 'Epic Coordinator', {
+    const plan = await askReadOnly(config, 'Epic Coordinator', {
       repo,
       shape: '{"summary":"...","decisions":[...],"stages":[{"id":"...","title":"...","concern":"...","scope":["path or glob"],"dependencies":[],"completion_criteria":[...],"checkpoint":"stable identity"}]}',
-      text: `Inspect the epic, repository, specifications, and advisory memory. Make architecture decisions and finish the stable stage plan before implementation. Every scope must be a non-empty list of repository paths or glob patterns. Do not implement.\nEPIC:\n${epic}\n\nSPECIFICATIONS:\n${specs}\n\nADVISORY MEMORY:\n${memory}\n\nRepository: ${repo}\nBranch: ${git(repo, ['branch', '--show-current']).stdout.trim()}\nTracked files:\n${git(repo, ['ls-files']).stdout.slice(0, 20_000)}`,
+      text: `Inspect the supplied epic, repository snapshot, specifications, and advisory memory. Make architecture decisions and finish the stable stage plan before implementation. Every scope must be a non-empty list of repository paths or glob patterns. Do not implement.\nEPIC:\n${epic}\n\nSPECIFICATIONS:\n${specs}\n\nADVISORY MEMORY:\n${memory}\n\nBranch: ${git(repo, ['branch', '--show-current']).stdout.trim()}\nTracked files:\n${git(repo, ['ls-files']).stdout.slice(0, 20_000)}`,
     }, specs, { strong: true });
     record.plan = { summary: plan.summary ?? '', decisions: plan.decisions ?? [] };
     record.stages = validatePlan(plan);
@@ -230,7 +303,7 @@ async function runStage(repo, record, stage, config, file, { repairContext = '' 
   save(record, file);
   const specContext = phaseContext(repo, config);
   const beforeExplore = runSnapshot(repo, record, file);
-  const exploration = await ask(config, 'Explore Agent', {
+  const exploration = await askReadOnly(config, 'Explore Agent', {
     repo,
     shape: '{"status":"pass|fail","findings":[],"files":[],"summary":"...","uncertainties":[]}',
     text: `Read-only repository investigation for this stage. Locate relevant files, conventions, tests, APIs, and dependencies. Do not edit files or decide architecture. Stage contract:\n${json(stageContract(stage))}`,
@@ -241,7 +314,7 @@ async function runStage(repo, record, stage, config, file, { repairContext = '' 
   save(record, file);
   if (explorationMutation.length) throw new RunError(`Explore Agent modified files: ${explorationMutation.join(', ')}`);
 
-  const coordination = await ask(config, 'Stage Coordinator', {
+  const coordination = await askReadOnly(config, 'Stage Coordinator', {
     repo,
     shape: '{"implementation_task":"...","review_focus":[...],"test_task":"...","validation_requirements":[...],"memory_handoff":"..."}',
     text: `Coordinate this stage with a fresh context. Do not implement. Convert the contract into bounded work for the implementer, reviewer, tester, and validator; select only relevant memory and record the handoff. Include prior phase results and any repair findings.\nCONTRACT:\n${json(stageContract(stage))}\nEXPLORE FINDINGS:\n${json(exploration)}\nMEMORY:\n${record.memory_consulted.excerpt}\nPRIOR RESULTS:\n${json(stage.phase_results)}\nREPAIR FINDINGS:\n${repairContext}`,
@@ -250,22 +323,32 @@ async function runStage(repo, record, stage, config, file, { repairContext = '' 
   save(record, file);
 
   const beforeImplement = runSnapshot(repo, record, file);
-  const implementation = await ask(config, 'Implement Agent', {
+  const implementationAttempt = await askScoped(config, 'Implement Agent', {
     repo,
     text: `Implement the source change within this stage scope. Do not edit tests, specs, memory, run records, or unrelated files. Return observed changed paths and checks. If this is a repair, fix only the reported findings.\nCONTRACT:\n${json(stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.implementation_task}\nREPAIR FINDINGS:\n${repairContext}`,
-  }, specContext);
+  }, specContext, {
+    allowedPath: (filePath) => !isTestPath(filePath) && !filePath.startsWith('specs/') &&
+      filePath !== record.epic_path && inScope(filePath, stage.scope),
+  });
+  const implementation = implementationAttempt.result;
   const implementChanges = changes(beforeImplement, runSnapshot(repo, record, file));
-  addPhase(stage, 'implement', implementation, { observed_changed_paths: implementChanges });
+  addPhase(stage, 'implement', implementation, {
+    observed_changed_paths: implementChanges,
+    attempted_changed_paths: implementationAttempt.attempted,
+    discarded_changed_paths: implementationAttempt.discarded,
+  });
   const implementationViolations = implementChanges.filter((filePath) =>
     isTestPath(filePath) || filePath.startsWith('specs/') || filePath === record.epic_path || !inScope(filePath, stage.scope));
   save(record, file);
   if (implementationViolations.length) throw new RunError(`Implementer changed files outside its source scope: ${implementationViolations.join(', ')}`);
   if (implementation.status !== 'pass' || !implementChanges.length) {
-    return { passed: false, reason: 'Implementation failed or produced no source changes', findings: implementation.findings ?? [] };
+    const discarded = implementationAttempt.discarded.length
+      ? `; discarded out-of-role writes: ${implementationAttempt.discarded.join(', ')}` : '';
+    return { passed: false, reason: `Implementation failed or produced no in-scope source changes${discarded}`, findings: implementation.findings ?? [] };
   }
 
   const beforeReview = runSnapshot(repo, record, file);
-  const review = await ask(config, 'Review Agent', {
+  const review = await askReadOnly(config, 'Review Agent', {
     repo,
     text: `Review the full diff read-only against the stage contract, specs, and repo rules. Pass only with no critical or major issue. Do not edit files.\nCONTRACT:\n${json(stageContract(stage))}\nREVIEW FOCUS:\n${json(coordination.review_focus ?? [])}\nDiff:\n${reviewDiff(repo, implementChanges)}`,
   }, specContext);
@@ -275,13 +358,21 @@ async function runStage(repo, record, stage, config, file, { repairContext = '' 
   if (reviewMutations.length) throw new RunError(`Review Agent modified files: ${reviewMutations.join(', ')}`);
 
   const beforeTest = runSnapshot(repo, record, file);
-  const tester = await ask(config, 'Test Agent', {
+  const testerAttempt = await askScoped(config, 'Test Agent', {
     repo,
-    text: `Create deterministic tests for required behavior and run the configured tests. You may change test files only; do not edit source/specs. Exact configured commands: ${json(config.workflow.test_commands)}.\nCONTRACT:\n${json(stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.test_task}\nREVIEW FINDINGS:\n${json(review.findings ?? [])}`,
-  }, specContext);
+    text: `Create deterministic tests for required behavior. Change test files only; do not run checks in this disposable workspace because Strata will execute the configured commands in the repository afterward.\nCONTRACT:\n${json(stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.test_task}\nREVIEW FINDINGS:\n${json(review.findings ?? [])}`,
+  }, specContext, {
+    allowedPath: (filePath) => isTestPath(filePath) && inScope(filePath, stage.scope),
+  });
+  const tester = testerAttempt.result;
   const testChanges = changes(beforeTest, runSnapshot(repo, record, file));
   const testViolations = testChanges.filter((filePath) => !isTestPath(filePath));
-  addPhase(stage, 'test', tester, { observed_changed_paths: testChanges, scope_violations: testViolations });
+  addPhase(stage, 'test', tester, {
+    observed_changed_paths: testChanges,
+    attempted_changed_paths: testerAttempt.attempted,
+    discarded_changed_paths: testerAttempt.discarded,
+    scope_violations: testViolations,
+  });
   save(record, file);
   const evidence = [
     ...runChecks(repo, config.workflow.test_commands, 'test'),
@@ -291,7 +382,7 @@ async function runStage(repo, record, stage, config, file, { repairContext = '' 
   save(record, file);
 
   const beforeValidate = runSnapshot(repo, record, file);
-  const validation = await ask(config, 'Validate Agent', {
+  const validation = await askReadOnly(config, 'Validate Agent', {
     repo,
     text: `Read-only gate. Check spec coverage, review resolution, test evidence, configured quality checks, repository rules, and scope. A missing/skipped required check fails. Do not edit anything.\nCONTRACT:\n${json(stageContract(stage))}\nCOORDINATOR REQUIREMENTS:\n${json(coordination.validation_requirements ?? [])}\nREVIEW:\n${json(review)}\nTESTER:\n${json(tester)}\nENGINE EVIDENCE:\n${json(evidence)}`,
   }, specContext);
@@ -361,14 +452,14 @@ async function runStageWithRepairs(repo, record, stage, config, file, initialFin
 
 async function finalValidation(repo, record, config, file) {
   const context = phaseContext(repo, config);
-  const review = await ask(config, 'Epic Coordinator', {
+  const review = await askReadOnly(config, 'Epic Coordinator', {
     repo,
     shape: '{"status":"pass|fail","findings":[],"target_stage_id":"optional stage id"}',
     text: `Review epic criteria, cross-stage consistency, regressions, and architecture. Check only completed work and return a target_stage_id if a targeted stage repair is needed.\nEPIC:\n${record.epic}\nSTAGE RESULTS:\n${json(record.stages)}`,
   }, context, { strong: true });
   const evidence = [...runChecks(repo, config.workflow.test_commands, 'final_test'), ...runChecks(repo, config.workflow.quality_checks, 'final_quality')];
   const beforeValidator = runSnapshot(repo, record, file);
-  const validator = await ask(config, 'Validate Agent', {
+  const validator = await askReadOnly(config, 'Validate Agent', {
     repo,
     shape: '{"status":"pass|fail","findings":[],"gates":[{"name":"...","passed":true,"evidence":"..."}]}',
     text: `Read-only final validation of epic criteria, stage results, review findings, test evidence, configured quality checks, repository rules, and plan integrity. Missing or skipped required checks fail. Do not edit files.\nEPIC:\n${record.epic}\nSTAGES:\n${json(record.stages)}\nEPIC REVIEW:\n${json(review)}\nENGINE EVIDENCE:\n${json(evidence)}`,
@@ -387,7 +478,7 @@ async function finalValidation(repo, record, config, file) {
 
 async function archiveMemory(repo, record, config) {
   const current = readTree(repo, [config.workflow.memory_path], 12_000);
-  const result = await ask(config, 'Archivist', {
+  const result = await askReadOnly(config, 'Archivist', {
     repo,
     shape: '{"entries":[{"class":"decision|note|progress","content":"..."}]}',
     text: `This run succeeded. Review it and current memory; propose only observed reusable engineering knowledge, check duplicates, and never include credentials, secrets, private content, or raw application data. Do not write specs, tests, or source. Include date, affected paths, and run id in entries.\nRUN:\n${json(record)}\nCURRENT MEMORY:\n${current}`,
