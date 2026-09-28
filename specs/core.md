@@ -23,7 +23,7 @@ Strata is a provider-agnostic CLI runtime for implementing large software featur
 - **CLI:** Loads config and the epic, detects repository state, initializes persistent run state, invokes agents, and records results.
 - **Epic Coordinator (Level 1):** A strong model that loads relevant memory, makes architectural decisions, creates the stable stage plan, and performs final integration review. See [role spec](agents/epic-coordinator.md).
 - **Stage Coordinator (Level 2):** A fresh strong-model context for a stage. It directs stage work, enforces gates and repair limits, checkpoints completed stages, and reports outcomes. See [role spec](agents/stage-coordinator.md).
-- **Workers (Level 3):** Configured agents for exploration, implementation, review, testing, and validation. Each receives a bounded role and returns structured results; workers do not control workflow. See [worker role specs](agents/).
+- **Workers (Level 3):** Configured agents for exploration, implementation, review, testing, and validation. The Tester owns executable verification and evidence; the Validator uses a fresh context for independent contract and criterion validation. See [worker role specs](agents/).
 - **Archivist:** Captures reusable memory after a successful run; it is not part of a stage loop. See [role spec](agents/archivist.md).
 
 ## 5. Planning and Context
@@ -39,11 +39,11 @@ Each stage follows this ordered lifecycle:
 
 1. **Implement:** An implementer changes source within the stage scope and reports changed paths and checks. It does not write tests, alter specifications, reorder stages, or checkpoint.
 2. **Review:** An independent, read-only reviewer checks the diff against the stage contract, specifications, and repository rules. A pass requires no critical or major issue.
-3. **Test:** A tester creates or runs tests for required behavior, modifying test files only, and reports commands, outcomes, and coverage.
-4. **Validate:** A read-only validator checks specification coverage, review findings, test evidence, configured quality checks, repository rules, and contract integrity.
-5. **Checkpoint:** Only after implementation, review, test, and validation pass, save a stage-identifying Git checkpoint and structured stage result.
+3. **Test (Tester):** Own executable verification: tests, typecheck, build, and configured quality checks. Return PASS/FAIL with commands and observed engine evidence. The Tester may modify test files only; configured checks execute through the runtime and their results are attached to Tester evidence.
+4. **Validate (Validator):** In a fresh context, inspect the final diff and code against the Stage Contract and every acceptance criterion. Also inspect review findings and Tester evidence. Return PASS/FAIL and specific evidence for each criterion. Passing tests alone never establish specification compliance.
+5. **Checkpoint:** Only after implementation, review, Tester, and Validator pass, save a stage-identifying Git checkpoint and structured stage result.
 
-Each phase returns a structured result. Gate outcomes come from executed engine evidence, not agent claims. A skipped or unavailable required check does not pass. A failed review, test, or validation may trigger a bounded, scoped repair followed by the required checks again. The Stage Coordinator assigns repair to the role allowed to change the affected files: implementers repair source; testers repair tests. Record every attempt and outcome. If repair is exhausted, a required gate cannot pass, or checkpointing fails, halt the run and preserve failure details and resumable state. Do not attempt later stages after an unrecoverable halt.
+Each phase returns a structured result. Gate outcomes come from executed engine evidence, not agent claims. A skipped or unavailable required check does not pass. A failed review, Tester, or Validator gate enters the existing bounded, scoped repair loop followed by required checks and fresh validation. The Stage Coordinator assigns repair to the role allowed to change affected files: implementers repair source; testers repair tests. Record every attempt and outcome. If repair is exhausted, a required gate cannot pass, or checkpointing fails, halt the run and preserve failure details and resumable state. Do not attempt later stages after an unrecoverable halt.
 
 ## 7. Run Completion and Memory
 - Resume from the original plan and checkpoint identities. Skip a completed stage only when its checkpoint exists; do not silently reorder or renumber stages.

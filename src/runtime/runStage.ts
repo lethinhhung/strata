@@ -2,6 +2,7 @@ import * as utils from './utils.js';
 import * as helpers from './helpers.js';
 import { RunError } from './types.js';
 import { runChecks } from './checks.js';
+import { validateStage } from './stageValidation.js';
 export async function runStage(repo: string, record: any, stage: any, config: any, file: string, { repairContext = '', repairRole = 'Implement Agent' } = {}) {
   stage.status = 'in_progress';
   utils.save(record, file);
@@ -20,17 +21,17 @@ helpers.addPhase(stage, 'explore', exploration, { observed_changed_paths: explor
   const coordination = await utils.askReadOnly(config, 'Stage Coordinator', {
     repo,
     shape: '{"implementation_task":"...","review_focus":[...],"test_task":"...","validation_requirements":[...],"memory_handoff":"..."}',
-    text: `Coordinate this stage with a fresh context. Do not implement. Convert the contract into bounded work for the implementer, reviewer, tester, and validator; select only relevant memory and record the handoff. Assign production source files to the Implement Agent and test files to the Test Agent. The Implement Agent must never be tasked with editing tests, and the Test Agent must never be tasked with editing production source. When repairing a failed test gate, assign the test expectation or coverage repair to the Test Agent. Include prior phase results and any repair findings.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nEXPLORE FINDINGS:\n${utils.json(exploration)}\nMEMORY:\n${record.memory_consulted.excerpt}\nPRIOR RESULTS:\n${utils.json(stage.phase_results)}\nREPAIR FINDINGS:\n${repairContext}`,
+    text: `Coordinate this stage with a fresh context. Do not implement. Convert the contract into bounded work for the implementer, reviewer, Tester, and Validator; select only relevant memory and record the handoff. Assign production source files to the Implement Agent and test files to the Tester. The Implement Agent must never be tasked with editing tests, and the Tester must never be tasked with editing production source. When repairing a failed test gate, assign the test expectation or coverage repair to the Tester. Include prior phase results and any repair findings.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nEXPLORE FINDINGS:\n${utils.json(exploration)}\nMEMORY:\n${record.memory_consulted.excerpt}\nPRIOR RESULTS:\n${utils.json(stage.phase_results)}\nREPAIR FINDINGS:\n${repairContext}`,
   }, specContext, { strong: true });
   helpers.addPhase(stage, 'stage_coordination', coordination);
   utils.save(record, file);
   const beforeImplement = utils.runSnapshot(repo, record, file);
-  const repairIsTestOnly = repairRole === 'Test Agent';
-  const implementationAttempt = await utils.askScoped(config, repairIsTestOnly ? 'Test Agent' : 'Implement Agent', {
+  const repairIsTestOnly = repairRole === 'Tester';
+  const implementationAttempt = await utils.askScoped(config, repairIsTestOnly ? 'Tester' : 'Implement Agent', {
     repo,
     text: repairIsTestOnly
       ? `Repair only the reported test expectations or coverage. Edit test files only; do not change production source.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.test_task}\nREPAIR FINDINGS:\n${repairContext}`
-      : `Implement the source change within this stage scope. Edit production source files only. Do not edit tests, specs, memory, run records, or unrelated files, even if the coordinator task asks for test edits; those belong to the Test Agent. Return observed changed paths and checks. If this is a repair, fix only the reported source findings.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.implementation_task}\nREPAIR FINDINGS:\n${repairContext}`,
+      : `Implement the source change within this stage scope. Edit production source files only. Do not edit tests, specs, memory, run records, or unrelated files, even if the coordinator task asks for test edits; those belong to the Tester. Return observed changed paths and checks. If this is a repair, fix only the reported source findings.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.implementation_task}\nREPAIR FINDINGS:\n${repairContext}`,
   }, specContext, {
     allowedPath: (filePath: string) => (repairIsTestOnly ? helpers.isTestPath(filePath) : !helpers.isTestPath(filePath)) &&
       !filePath.startsWith('specs/') && filePath !== record.epic_path && helpers.inScope(filePath, stage.scope),
@@ -68,7 +69,7 @@ helpers.addPhase(stage, 'explore', exploration, { observed_changed_paths: explor
   const beforeReview = utils.runSnapshot(repo, record, file);
   const review = await utils.askReadOnly(config, 'Review Agent', {
     repo,
-    text: `Review only the production-source diff read-only against the stage contract, specs, and repo rules. Pass only with no critical or major issue in the source change. The Test Agent runs after this review and owns all test-file edits; do not fail review because required tests have not yet been added or updated. Do not edit files.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREVIEW FOCUS:\n${utils.json(coordination.review_focus ?? [])}\nProduction-source diff:\n${helpers.reviewDiff(repo, effectiveImplementChanges, stage.checkpoint_commit)}`,
+    text: `Review only the production-source diff read-only against the stage contract, specs, and repo rules. Pass only with no critical or major issue in the source change. The Tester runs after this review and owns all test-file edits; do not fail review because required tests have not yet been added or updated. Do not edit files.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREVIEW FOCUS:\n${utils.json(coordination.review_focus ?? [])}\nProduction-source diff:\n${helpers.reviewDiff(repo, effectiveImplementChanges, stage.checkpoint_commit)}`,
   }, specContext, {});
   const reviewMutations = utils.changes(beforeReview, utils.runSnapshot(repo, record, file));
   helpers.addPhase(stage, 'review', review, { observed_changed_paths: reviewMutations });
@@ -76,44 +77,37 @@ helpers.addPhase(stage, 'explore', exploration, { observed_changed_paths: explor
   if (reviewMutations.length) throw new RunError(`Review Agent modified files: ${reviewMutations.join(', ')}`);
 
   const beforeTest = utils.runSnapshot(repo, record, file);
-  const testerAttempt = repairIsTestOnly ? { result: implementation, attempted: implementationAttempt.attempted, discarded: implementationAttempt.discarded } : await utils.askScoped(config, 'Test Agent', {
+  const testerAttempt = repairIsTestOnly ? { result: implementation, attempted: implementationAttempt.attempted, discarded: implementationAttempt.discarded } : await utils.askScoped(config, 'Tester', {
     repo,
-    text: `Create deterministic tests for required behavior. Change test files only; do not run checks in this disposable workspace because Strata will execute the configured commands in the repository afterward.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.test_task}\nREVIEW FINDINGS:\n${utils.json(review.findings ?? [])}`,
+    text: `Own executable verification for this stage: add or update deterministic tests when needed, then report PASS/FAIL with evidence. Change test files only; Strata executes configured test and quality commands and attaches observed output to your result. Never claim a command passed without engine evidence.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.test_task}\nREVIEW FINDINGS:\n${utils.json(review.findings ?? [])}`,
   }, specContext, {
     allowedPath: (filePath: string) => helpers.isTestPath(filePath) && helpers.inScope(filePath, stage.scope),
   });
   const tester = testerAttempt.result;
   const testChanges = repairIsTestOnly ? implementChanges : utils.changes(beforeTest, utils.runSnapshot(repo, record, file));
   const testViolations = testChanges.filter((filePath: string) => !helpers.isTestPath(filePath));
-  helpers.addPhase(stage, 'test', tester, {
+  const evidence = [
+    ...runChecks(repo, config.workflow.test_commands, 'test'),
+    ...runChecks(repo, config.workflow.quality_checks, 'quality'),
+  ];
+  const testerResult = { ...tester, evidence };
+  helpers.addPhase(stage, 'test', testerResult, {
     observed_changed_paths: testChanges,
     attempted_changed_paths: testerAttempt.attempted,
     discarded_changed_paths: testerAttempt.discarded,
     scope_violations: testViolations,
   });
   utils.save(record, file);
-  const evidence = [
-    ...runChecks(repo, config.workflow.test_commands, 'test'),
-    ...runChecks(repo, config.workflow.quality_checks, 'quality'),
-  ];
   helpers.addPhase(stage, 'engine_checks', evidence);
   utils.save(record, file);
-  const beforeValidate = utils.runSnapshot(repo, record, file);
-  const validation = await utils.askReadOnly(config, 'Validate Agent', {
-    repo,
-    text: `Read-only gate. Check spec coverage, review resolution, test evidence, configured quality checks, repository rules, and scope. A missing/skipped required check fails. Do not edit anything.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nCOORDINATOR REQUIREMENTS:\n${utils.json(coordination.validation_requirements ?? [])}\nREVIEW:\n${utils.json(review)}\nTESTER:\n${utils.json(tester)}\nENGINE EVIDENCE:\n${utils.json(evidence)}`,
-  }, specContext, {});
-  const validationMutations = utils.changes(beforeValidate, utils.runSnapshot(repo, record, file));
-  helpers.addPhase(stage, 'validate', validation, { observed_changed_paths: validationMutations });
-  utils.save(record, file);
-  if (validationMutations.length) throw new RunError(`Validate Agent modified files: ${validationMutations.join(', ')}`);
+  const validationResult = await validateStage(repo, record, stage, config, file, specContext, coordination, review, testerResult, evidence, [...effectiveImplementChanges, ...testChanges]);
   const passed = review.status === 'pass' && !(review.findings ?? []).some((item: any) => ['critical', 'major'].includes(String(item.severity).toLowerCase())) &&
     tester.status === 'pass' && !testViolations.length && config.workflow.test_commands.length > 0 &&
     evidence.some((item: any) => item.kind === 'test') && evidence.every((item: any) => item.passed) &&
-    validation.status === 'pass' && !validationMutations.length;
+    validationResult.passed;
   return {
     passed,
     reason: passed ? '' : 'A required stage gate failed or required test evidence is unavailable',
-    findings: { implementation: implementation.findings ?? [], review: review.findings ?? [], test: tester.findings ?? [], validation: validation.findings ?? [], evidence },
+    findings: { implementation: implementation.findings ?? [], review: review.findings ?? [], test: tester.findings ?? [], validation: validationResult.validation, evidence },
   };
 }

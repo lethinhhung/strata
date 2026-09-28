@@ -17,11 +17,11 @@ flowchart TD
     IMPL --> REVIEW[Independent read-only review<br/>Against stage, specs, rules, and diff]
     REVIEW --> RG{Review passes?}
     RG -->|No| REPAIR[Stage Coordinator analyzes evidence<br/>Assign scoped repair to the authorized role]
-    RG -->|Yes| TEST[Tester creates/runs required tests<br/>May modify test files only]
-    TEST --> TG{Tests pass?}
+    RG -->|Yes| TEST[Tester owns executable verification<br/>Tests, typecheck, build, quality checks]
+    TEST --> TG{Tester PASS with engine evidence?}
     TG -->|No| REPAIR
-    TG -->|Yes| VALIDATE[Read-only validation of coverage,<br/>review, tests, and configured quality checks]
-    VALIDATE --> VG{All required gates pass<br/>with engine evidence?}
+    TG -->|Yes| VALIDATE[Fresh-context Validator inspects final diff/code<br/>against Stage Contract and every criterion]
+    VALIDATE --> VG{Validator PASS with evidence<br/>for every criterion?}
     VG -->|No| REPAIR
     VG -->|Yes| CHECKPOINT[Save stage-identifying Git checkpoint<br/>and structured phase results]
     CHECKPOINT --> CP{Checkpoint succeeds?}
@@ -51,9 +51,9 @@ flowchart TD
 
 ## Workflow invariants
 
-- A stage follows **implement → review → test → validate → checkpoint**. Exploration and task planning happen before implementation.
+- A stage follows **implement → review → Tester verification → Validator → checkpoint**. Tester owns executable checks; Validator independently checks the final diff and code against every acceptance criterion.
 - Phase and gate results are structured. Only executed engine evidence can pass a required gate; skipped or unavailable checks are not passing.
-- Failed review, test, or validation enters a scoped, bounded repair loop. Exhaustion, unavailable required evidence, or checkpoint failure halts execution and preserves resumable state.
+- Passing tests alone never establishes spec compliance. Failed review, Tester, or Validator results enter the existing scoped, bounded repair loop. Exhaustion, unavailable required evidence, or checkpoint failure halts execution and preserves resumable state.
 - Stages have stable identities and run in dependency order. Resumption uses the original plan and checkpoint identities.
 - Load relevant memory before planning and delegation. Memory is advisory, not gate evidence. Archive reusable knowledge only once after the whole run succeeds; archive failure does not change run completion.
 - Shared mutations are serialized unless explicitly isolated. Provider-specific behavior belongs in adapters; workflow contracts remain provider-neutral.

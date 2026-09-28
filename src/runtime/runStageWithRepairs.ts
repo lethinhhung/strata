@@ -11,7 +11,7 @@ export async function runStageWithRepairs(repo: string, record: any, stage: any,
     try {
       result = await runStage(repo, record, stage, config, file, {
         repairContext,
-        repairRole: repairIsTestOnly(repairContext) ? 'Test Agent' : 'Implement Agent',
+        repairRole: repairIsTestOnly(repairContext) ? 'Tester' : 'Implement Agent',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
