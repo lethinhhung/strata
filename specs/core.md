@@ -1,5 +1,7 @@
 # Strata Core Specification
 
+This document is the normative source of truth for Strata behavior. Supporting specs and diagrams must follow it; they may clarify or present it, but cannot override it.
+
 ## 1. Purpose
 Strata is a provider-agnostic CLI runtime for implementing large software features from specifications through hierarchical agent coordination.
 
@@ -41,7 +43,7 @@ Each stage follows this ordered lifecycle:
 4. **Validate:** A read-only validator checks specification coverage, review findings, test evidence, configured quality checks, repository rules, and contract integrity.
 5. **Checkpoint:** Only after implementation, review, test, and validation pass, save a stage-identifying Git checkpoint and structured stage result.
 
-Each phase returns a structured result. Gate outcomes come from executed engine evidence, not agent claims. A skipped or unavailable required check does not pass. A failed review, test, or validation may trigger a bounded, scoped repair followed by the required checks again. Record every attempt and outcome. If repair is exhausted, a required gate cannot pass, or checkpointing fails, halt the run and preserve failure details and resumable state. Do not attempt later stages after an unrecoverable halt.
+Each phase returns a structured result. Gate outcomes come from executed engine evidence, not agent claims. A skipped or unavailable required check does not pass. A failed review, test, or validation may trigger a bounded, scoped repair followed by the required checks again. The Stage Coordinator assigns repair to the role allowed to change the affected files: implementers repair source; testers repair tests. Record every attempt and outcome. If repair is exhausted, a required gate cannot pass, or checkpointing fails, halt the run and preserve failure details and resumable state. Do not attempt later stages after an unrecoverable halt.
 
 ## 7. Run Completion and Memory
 - Resume from the original plan and checkpoint identities. Skip a completed stage only when its checkpoint exists; do not silently reorder or renumber stages.

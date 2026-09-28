@@ -1,5 +1,7 @@
 # Strata Run Flow
 
+This diagram presents the workflow defined by [core.md](core.md), which is normative if any detail here is unclear.
+
 ```mermaid
 flowchart TD
     U[User submits epic] --> CLI[CLI loads config and epic, detects repository state, initializes persistent run;<br/>save UTC timestamp-prefixed run records in docs/temps/]
@@ -14,7 +16,7 @@ flowchart TD
     TASKS --> IMPL[Implementer changes source within stage scope<br/>Returns structured result and changed paths]
     IMPL --> REVIEW[Independent read-only review<br/>Against stage, specs, rules, and diff]
     REVIEW --> RG{Review passes?}
-    RG -->|No| REPAIR[Stage Coordinator analyzes evidence<br/>Assign scoped repair within retry limit]
+    RG -->|No| REPAIR[Stage Coordinator analyzes evidence<br/>Assign scoped repair to the authorized role]
     RG -->|Yes| TEST[Tester creates/runs required tests<br/>May modify test files only]
     TEST --> TG{Tests pass?}
     TG -->|No| REPAIR
@@ -29,16 +31,18 @@ flowchart TD
     MORE -->|No| FINAL[ Epic Coordinator performs final integration review<br/>Checks epic criteria, consistency, regressions, architecture]
     FINAL --> FV[Run final validation]
     FV --> FVG{Final validation passes?}
-    FVG -->|No| FREPAIR[Targeted stage repair<br/>Then repeat required stage gates and final validation]
+    FVG -->|No| FREPAIR[Targeted stage repair by authorized role<br/>Then repeat required stage gates and final validation]
     FREPAIR --> FLIMIT{Final repair budget remains?}
-    FLIMIT -->|Yes| IMPL
+    FLIMIT -->|Yes, source change| IMPL
+    FLIMIT -->|Yes, test-only change| TEST
     FLIMIT -->|No| HALT
     FVG -->|Yes| EPICCP[Save epic checkpoint and complete run result]
     EPICCP --> ARCH[Archivist captures observed, reusable memory<br/>once after successful run to configured store]
     ARCH --> DONE[Done]
 
     REPAIR --> LIMIT{Retry budget remains?}
-    LIMIT -->|Yes| IMPL
+    LIMIT -->|Yes, source change| IMPL
+    LIMIT -->|Yes, test-only change| TEST
     LIMIT -->|No| HALT
     TEST -. unavailable required test .-> HALT
     VALIDATE -. unavailable required check .-> HALT
