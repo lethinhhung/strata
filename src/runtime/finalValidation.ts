@@ -1,5 +1,4 @@
 import * as utils from './utils.js';
-import * as helpers from './helpers.js';
 import { runChecks } from './checks.js';
 
 export async function finalValidation(repo: string, record: any, config: any, file: string) {

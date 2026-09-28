@@ -3,7 +3,6 @@ import * as utils from './utils.js';
 import { runStageWithRepairs } from './runStageWithRepairs.js';
 import { finalValidation } from './finalValidation.js';
 import { archiveMemory } from './archiveMemory.js';
-import { checkpoint } from './checkpoint.js';
 
 export async function executeRun(repo: string, record: any, config: any, file: string) {
   record.status = 'running';
