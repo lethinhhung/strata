@@ -1,5 +1,4 @@
 import { RunError } from './types.js';
-import * as utils from './utils.js';
 import { executeRun } from './executeRun.js';
 import { loadRun } from './loadRun.js';
 import path from 'node:path';

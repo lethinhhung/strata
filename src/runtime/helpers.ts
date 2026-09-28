@@ -1,5 +1,4 @@
 import { git, now } from './utils.js';
-import { runChecks } from './checks.js';
 import * as path from 'node:path';
 import fs from 'node:fs';
 

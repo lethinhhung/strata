@@ -1,5 +1,4 @@
 import * as utils from './utils.js';
-import * as helpers from './helpers.js';
 import { RunError } from './types.js';
 import { inScope } from './helpers.js';
 

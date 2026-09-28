@@ -1,10 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import { invoke } from '../providers.js';
-import { RunError } from './types.js';
 import { copyWorkspace, workspaceFiles } from './workspace.js';
 import { parseObject } from './parse.js';
 

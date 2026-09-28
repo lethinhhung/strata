@@ -13,6 +13,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test dist/src/*.test.js",
+    "test:ci": "tsx --test src/*.test.ts",
+    "lint": "eslint src",
     "start": "node dist/src/cli.js"
   },
   "dependencies": {
@@ -20,6 +22,9 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.43",
-    "typescript": "^5.4.5"
+    "eslint": "^10.11.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.4.5",
+    "typescript-eslint": "^8.70.1"
   }
 }

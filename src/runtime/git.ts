@@ -1,9 +1,7 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { invoke } from '../providers.js';
 import { RunError } from './types.js';
 
 export function git(repo: string, args: string[], { allowFailure = false } = {}) {
