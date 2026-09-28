@@ -8,6 +8,8 @@ Migrate Strata's Node.js CLI from JavaScript to TypeScript while preserving its 
 - Keep every tracked file below 120 lines; split long modules and documents as needed.
 - Preserve the CLI, provider, config, workflow, checkpoint, and resume behavior in `README.md` and `specs/`.
 - Add regression tests and provide working `npm test`, `npm run typecheck`, and build scripts.
+- Scope each stage's test files explicitly; keep TypeScript tests in `src/*.test.ts` and compile them before running Node's built-in test runner.
+- Include generated build output in `.gitignore` and ensure no generated files enter checkpoints.
 - Keep Node.js 20+ support and the `strata` executable.
 
 ## Acceptance
