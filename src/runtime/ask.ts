@@ -1,6 +1,6 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { invoke } from '../providers.js';
 import { copyWorkspace, workspaceFiles } from './workspace.js';
 import { parseObject } from './parse.js';
@@ -13,8 +13,9 @@ export async function askScoped(config: any, role: string, task: any, context: s
     const before = workspaceFiles(workspace);
     const result = await ask(config, role, { ...task, repo: workspace }, context, { strong, skipGitRepoCheck: true });
     const after = workspaceFiles(workspace);
-    const attempted = [...new Set([...before.keys(), ...after.keys()])]
-      .filter((file) => before.get(file) !== after.get(file)).sort();
+const attempted = Array.from(new Set([...Array.from(before.keys()), ...Array.from(after.keys())]))
+    .filter((file) => before.get(file) !== after.get(file))
+    .sort();
     const applied = attempted.filter((file) => allowedPath(file) && after.get(file) !== 'symlink');
     const discarded = attempted.filter((file) => !allowedPath(file) || after.get(file) === 'symlink');
     for (const file of applied) {

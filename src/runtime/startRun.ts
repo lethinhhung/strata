@@ -1,7 +1,7 @@
-import { RunError } from './types.js';
+import { RunError, RunRecord } from './types.js';
 import * as utils from './utils.js';
-import path from 'node:path';
-import fs from 'node:fs';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
 import { executeRun } from './executeRun.js';
 
 export async function startRun(repo: string, epicPath: string, config: any) {
@@ -15,13 +15,37 @@ export async function startRun(repo: string, epicPath: string, config: any) {
   const specs = utils.phaseContext(repo, config);
   const id = utils.runId();
   const file = utils.recordPath(repo, id);
-  const record: any = {
-    schema_version: 1, run_id: id, status: 'planning', created_at: utils.now(), repository: repo,
-    epic, epic_path: path.relative(repo, absoluteEpic), epic_absolute_path: absoluteEpic, config: config.path,
-    memory_consulted: { paths: memoryPaths, excerpt: memory }, stages: [], attempts: [], events: [], archival: { status: 'pending' },
-  };
-  utils.save(record, file);
+const record: RunRecord = {
+       schema_version: 1,
+       run_id: id,
+       status: 'planning',
+       created_at: utils.now(),
+       repository: repo,
+       epic,
+       epic_path: path.relative(repo, absoluteEpic),
+       epic_absolute_path: absoluteEpic,
+       config: config.path,
+       memory_consulted: { paths: memoryPaths, excerpt: memory },
+       stages: [],
+       attempts: [],
+       events: [],
+       archival: undefined,
+       progress: [],
+       plan: undefined,
+       updated_at: undefined,
+       final_review: undefined,
+       final_validation: undefined,
+       final_evidence: undefined,
+       final_validated_at: undefined,
+       epic_checkpoint: undefined,
+       completed_at: undefined,
+       failure: undefined,
+     };
+    record.progress.push({ type: 'run', subtype: 'start', timestamp: utils.now() });
+    utils.save(record, file);
   try {
+    record.progress.push({ type: 'agent', subtype: 'epic_coordinator', stage_id: 'epic', timestamp: utils.now() });
+    utils.save(record, file);
     const plan = await utils.askReadOnly(config, 'Epic Coordinator', {
       repo,
       shape: '{"summary":"...","decisions":[...],"stages":[{"id":"...","title":"...","concern":"...","scope":["path or glob"],"dependencies":[],"completion_criteria":[...],"checkpoint":"stable identity"}]',
@@ -36,7 +60,8 @@ export async function startRun(repo: string, epicPath: string, config: any) {
   } catch (error) {
     if (record.status !== 'complete') {
       record.status = 'failed';
-      record.failure = error instanceof Error ? error.message : String(error);
+      record.failure = { message: error instanceof Error ? error.message : String(error), timestamp: utils.now() };
+      record.progress.push({ type: 'run', subtype: 'fail', timestamp: utils.now() });
       record.updated_at = utils.now();
       utils.save(record, file);
     }

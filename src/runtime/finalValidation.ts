@@ -1,8 +1,39 @@
 import * as utils from './utils.js';
 import { runChecks } from './checks.js';
+import { RunRecord } from './types.js';
 
 export async function finalValidation(repo: string, record: any, config: any, file: string) {
+  // Ensure record has all required fields
+  if (!('progress' in record) || !Array.isArray(record.progress)) {
+    record.progress = [];
+  }
+const defaultRecord: Partial<RunRecord> = {
+     created_at: '',
+     repository: '',
+     epic: '',
+     epic_path: '',
+     epic_absolute_path: '',
+     config: { worker:{}, strong:{}, workflow:{ max_repairs:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', test_commands:[], quality_checks:[], }, path:undefined },
+     memory_consulted: { paths:[], excerpt:'' },
+     plan: undefined,
+     updated_at: undefined,
+     final_review: undefined,
+     final_validation: undefined,
+     final_evidence: undefined,
+     final_validated_at: undefined,
+     epic_checkpoint: undefined,
+     completed_at: undefined,
+     failure: undefined,
+   };
+(Object.keys(defaultRecord) as (keyof RunRecord)[]).forEach(key => {
+     if (!(key in record)) {
+       (record as any)[key] = defaultRecord[key];
+     }
+   });
+  // Now record is guaranteed to have all fields of RunRecord
   const context = utils.phaseContext(repo, config);
+  record.progress.push({ type: 'agent', subtype: 'epic_coordinator', stage_id: 'epic', timestamp: utils.now() });
+  utils.save(record, file);
   const review = await utils.askReadOnly(config, 'Epic Coordinator', {
     repo,
     shape: '{"status":"pass|fail","findings":[],"target_stage_id":"optional stage id"}',
@@ -10,6 +41,8 @@ export async function finalValidation(repo: string, record: any, config: any, fi
   }, context, { strong: true });
   const evidence = [...runChecks(repo, config.workflow.test_commands, 'final_test'), ...runChecks(repo, config.workflow.quality_checks, 'final_quality')];
   const beforeValidator = utils.runSnapshot(repo, record, file);
+  record.progress.push({ type: 'agent', subtype: 'validate', stage_id: 'epic', timestamp: utils.now() });
+  utils.save(record, file);
   const validator = await utils.askReadOnly(config, 'Validate Agent', {
     repo,
     shape: '{"status":"pass|fail","findings":[],"gates":[{"name":"...","passed":true,"evidence":"..."}]}',
@@ -23,6 +56,7 @@ export async function finalValidation(repo: string, record: any, config: any, fi
   const passed = review.status === 'pass' && !(review.findings ?? []).length &&
     validator.status === 'pass' && !validatorMutations.length &&
     config.workflow.test_commands.length > 0 && evidence.some((item: any) => item.kind === 'final_test') && evidence.every((item: any) => item.passed);
+  record.progress.push({ type: 'gate', subtype: 'validation', stage_id: 'epic', timestamp: utils.now(), passed });
   utils.save(record, file);
   return { passed, review, evidence };
 }

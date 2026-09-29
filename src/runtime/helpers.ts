@@ -1,6 +1,6 @@
 import { git, now } from './utils.js';
 import * as path from 'node:path';
-import fs from 'node:fs';
+import * as fs from 'node:fs';
 
 export function stageContract(stage: any) {
   return Object.fromEntries(['id', 'title', 'concern', 'scope', 'dependencies', 'completion_criteria', 'checkpoint'].map((key) => [key, stage[key]]));

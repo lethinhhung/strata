@@ -1,9 +1,39 @@
 import * as utils from './utils.js';
-import path from 'node:path';
-import fs from 'node:fs';
-import { RunError } from './types.js';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import { RunError, RunRecord } from './types.js';
 
 export async function archiveMemory(repo: string, record: any, config: any) {
+   // Ensure record has all required fields
+   if (!('progress' in record) || !Array.isArray(record.progress)) {
+     record.progress = [];
+   }
+   // Record archive agent transition
+   record.progress.push({ type: 'agent', subtype: 'archive', stage_id: 'epic', timestamp: utils.now() });
+const defaultRecord: Partial<RunRecord> = {
+     created_at: '',
+     repository: '',
+     epic: '',
+     epic_path: '',
+     epic_absolute_path: '',
+     config: { worker:{}, strong:{}, workflow:{ max_repairs:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', test_commands:[], quality_checks:[], }, path:undefined },
+     memory_consulted: { paths:[], excerpt:'' },
+     plan: undefined,
+     updated_at: undefined,
+     final_review: undefined,
+     final_validation: undefined,
+     final_evidence: undefined,
+     final_validated_at: undefined,
+     epic_checkpoint: undefined,
+     completed_at: undefined,
+     failure: undefined,
+   };
+(Object.keys(defaultRecord) as (keyof RunRecord)[]).forEach(key => {
+     if (!(key in record)) {
+       (record as any)[key] = defaultRecord[key as keyof Partial<RunRecord>];
+     }
+   });
+  // Now record is guaranteed to have all fields of RunRecord
   const current = utils.readTree(repo, [config.workflow.memory_path], 12_000);
   const result = await utils.askReadOnly(config, 'Archivist', {
     repo,

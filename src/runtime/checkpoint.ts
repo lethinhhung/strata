@@ -1,8 +1,36 @@
 import * as utils from './utils.js';
-import { RunError } from './types.js';
+import { RunError, RunRecord } from './types.js';
 import { inScope } from './helpers.js';
 
 export function checkpoint(repo: string, stage: any, config: any, record: any, file: string, attempt: number) {
+  // Ensure record has all required fields
+  if (!('progress' in record) || !Array.isArray(record.progress)) {
+    record.progress = [];
+  }
+const defaultRecord: Partial<RunRecord> = {
+     created_at: '',
+     repository: '',
+     epic: '',
+     epic_path: '',
+     epic_absolute_path: '',
+     config: { worker:{}, strong:{}, workflow:{ max_repairs:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', test_commands:[], quality_checks:[], }, path:undefined },
+     memory_consulted: { paths:[], excerpt:'' },
+     plan: undefined,
+     updated_at: undefined,
+     final_review: undefined,
+     final_validation: undefined,
+     final_evidence: undefined,
+     final_validated_at: undefined,
+     epic_checkpoint: undefined,
+     completed_at: undefined,
+     failure: undefined,
+   };
+(Object.keys(defaultRecord) as (keyof RunRecord)[]).forEach(key => {
+     if (!(key in record)) {
+       (record as any)[key] = defaultRecord[key];
+     }
+   });
+  // Now record is guaranteed to have all fields of RunRecord
   const changed = utils.changes(new Map(), utils.runSnapshot(repo, record, file));
   const eligible = changed.filter((filePath: string) => !filePath.startsWith('specs/') && !filePath.startsWith('docs/temps/'));
   const unrelated = eligible.filter((filePath: string) => !inScope(filePath, stage.scope ?? []));
