@@ -33,7 +33,7 @@ test_commands = [["npm", "test", "--", "--runInBand"]]
 quality_checks = [["npm", "run", "lint"], ["npm", "run", "typecheck"]]
 ```
 
-The test command is required for a stage to pass. Configure only checks that exist in the target repository. `max_repairs` bounds repair attempts after the initial gate attempt. Stage commits and the final annotated epic tag are required checkpoints.
+The test command is required for a stage to pass. Configure only checks that exist in the target repository. `max_repairs` bounds repair attempts after the initial gate attempt. Each repair receives the recorded review, test, and validation findings; the Implement Agent can fix source causes, the Test Agent can adjust test coverage or expectations, and Strata reruns the gates before checkpointing. Stage commits and the final annotated epic tag are required checkpoints.
 
 ## Run an epic
 

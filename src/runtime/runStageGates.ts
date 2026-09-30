@@ -4,7 +4,7 @@ import { RunError } from './types.js';
 import { runChecks } from './checks.js';
 
 export async function runStageGates(repo: string, record: any, stage: any, config: any, file: string,
-  specContext: string, coordination: any, repairIsTestOnly: boolean, implementation: any,
+  specContext: string, coordination: any, repairContext: string, implementation: any,
   implementationAttempt: any, implementChanges: string[], sourceChanges: string[]) {
   const beforeReview = utils.runSnapshot(repo, record, file);
   record.progress.push({ type: 'agent', subtype: 'review', stage_id: stage.id, timestamp: utils.now() });
@@ -27,11 +27,11 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
   const beforeTest = utils.runSnapshot(repo, record, file);
   record.progress.push({ type: 'agent', subtype: 'test', stage_id: stage.id, timestamp: utils.now() });
   utils.save(record, file);
-  const tested = repairIsTestOnly ? { result: implementation, attempted: implementationAttempt.attempted, discarded: implementationAttempt.discarded } : await utils.askScoped(config, 'Test Agent', {
-    repo, text: `Create deterministic tests; edit test files only. Strata runs configured checks in the repository.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nTASK:\n${coordination.test_task}\nREVIEW:\n${utils.json(review.findings ?? [])}`,
+  const tested = await utils.askScoped(config, 'Test Agent', {
+    repo, text: `Create deterministic tests; edit test files only. Strata runs configured checks in the repository. On a repair attempt, use the carried findings to correct test expectations or coverage only when the tests conflict with the contract; do not weaken tests to hide a production defect.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nTASK:\n${coordination.test_task}\nREVIEW:\n${utils.json(review.findings ?? [])}\nCARRIED REPAIR FINDINGS:\n${repairContext}`,
   }, specContext, { allowedPath: (target: string) => helpers.isTestPath(target) && helpers.inScope(target, stage.scope) });
   const tester = tested.result;
-  const testChanges = repairIsTestOnly ? implementChanges : utils.changes(beforeTest, utils.runSnapshot(repo, record, file));
+  const testChanges = utils.changes(beforeTest, utils.runSnapshot(repo, record, file));
   const testViolations = testChanges.filter((target: string) => !helpers.isTestPath(target));
   helpers.addPhase(stage, 'test', tester, { observed_changed_paths: testChanges, attempted_changed_paths: tested.attempted, discarded_changed_paths: tested.discarded, scope_violations: testViolations });
   const evidence = [...runChecks(repo, config.workflow.test_commands, 'test'), ...runChecks(repo, config.workflow.quality_checks, 'quality')];
