@@ -14,16 +14,17 @@ export async function repairGate(repo: string, record: any, stage: any, config: 
   utils.save(record, file);
   const result = await utils.askScoped(config, agent, {
     repo,
-    text: `Repair the ${gate} gate (repair ${attempt}) using the exact findings and evidence below. Test Agent edits must stay in test files. Implement Agent may extend beyond the original stage scope only to files directly implicated by the reported failure, and must not edit tests, specs, run records, or unrelated files. Fix the underlying cause; never weaken a test or hide a production defect. After edits, report what changed and what still blocks the gate.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nROUTED TASK:\n${task}\nGATE FINDINGS:\n${utils.json(findings)}`,
+    text: `Repair the ${gate} gate (repair ${attempt}) using the findings and evidence below. Choose any relevant project files needed to resolve the failure; the original stage scope is context, not a repair limit. Test Agent edits test files only. Implement Agent edits source and configuration files only. Preserve unrelated work, specs, memory, and run records. Fix the underlying cause; never weaken a test or hide a production defect. After edits, report what changed and what still blocks the gate.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nROUTED TASK:\n${task}\nGATE FINDINGS:\n${utils.json(findings)}`,
   }, context, {
     allowedPath: (target: string) => role === 'tests'
       // Test repairs may need to fix a failing test outside the stage's
       // production/configuration scope. Keep the role boundary strict while
       // allowing the Test Agent to edit test files anywhere in the repository.
       ? helpers.isTestPath(target)
-      // Engine check failures can implicate existing production/config files
-      // outside the original feature scope (for example, a repo-wide lint run).
-      : !helpers.isTestPath(target) && !target.startsWith('specs/') && target !== record.epic_path,
+      // Failed checks may require source/config fixes beyond the feature scope.
+      : !helpers.isTestPath(target) && !target.startsWith('specs/') &&
+        !target.startsWith('memory/') && !target.startsWith('docs/temps/') &&
+        target !== record.epic_path && target !== file,
   });
   const changed = utils.changes(before, utils.runSnapshot(repo, record, file));
   const violations = result.discarded;
