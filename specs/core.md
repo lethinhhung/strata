@@ -37,7 +37,7 @@ Strata is a provider-agnostic CLI runtime for implementing large software featur
 ## 6. Stage Lifecycle
 Each stage follows this ordered lifecycle:
 
-1. **Implement:** An implementer changes source within the stage scope and reports changed paths and checks. It does not write tests, alter specifications, reorder stages, or checkpoint.
+1. **Implement:** Initial implementation stays within stage scope. Gate repairs may address implicated source or configuration files outside that scope; the implementer does not write tests, alter specifications, reorder stages, or checkpoint.
 2. **Review:** An independent, read-only reviewer checks the diff against the stage contract, specifications, and repository rules. A pass requires no critical or major issue.
 3. **Test:** A tester creates or runs tests for required behavior, modifying test files only, and reports commands, outcomes, and coverage.
 4. **Validate:** A read-only validator checks specification coverage, review findings, test evidence, configured quality checks, repository rules, and contract integrity.
