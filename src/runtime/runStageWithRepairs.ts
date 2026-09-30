@@ -89,13 +89,13 @@ export function repairIsTestOnly(context: unknown) {
     const issuesAreTestOnly = testIssues.length > 0 && testIssues.every(isTestFinding);
     return (issuesAreTestOnly || failedTestEvidence) && (!hasValidationFailure || validationIssues.length > 0 && validationIssues.every(isTestFinding));
   }
-  return /test|coverage/i.test(String(findings));
+  return /missing test coverage|test assertion|test expectation|tests? (?:are )?failing/i.test(String(findings));
 }
 
 function isTestFinding(item: any) {
   const file = item && typeof item === 'object' ? item.path ?? item.file ?? '' : '';
   const detail = `${file} ${item?.message ?? item?.description ?? item ?? ''}`;
-  return helpers.isTestPath(file) || /test|coverage/i.test(detail);
+  return helpers.isTestPath(file) || /missing test coverage|test assertion|test expectation|tests? (?:are )?failing/i.test(detail);
 }
 
 function isSubstantiveSourceFinding(item: any) {
