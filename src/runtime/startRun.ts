@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { executeRun } from './executeRun.js';
 
-export async function startRun(repo: string, epicPath: string, config: any) {
+export async function startRun(repo: string, epicPath: string, config: any, onProgress?: (entry: any) => void) {
   const absoluteEpic = path.resolve(repo, epicPath);
   if (!fs.existsSync(absoluteEpic) || !fs.statSync(absoluteEpic).isFile()) throw new RunError(`Epic file not found: ${absoluteEpic}`);
   if (utils.git(repo, ['rev-parse', '--is-inside-work-tree']).stdout.trim() !== 'true') throw new RunError('Target directory must be a Git worktree');
@@ -41,6 +41,7 @@ const record: RunRecord = {
        completed_at: undefined,
        failure: undefined,
      };
+    if (onProgress) Object.defineProperty(record, 'onProgress', { value: onProgress, configurable: true });
     record.progress.push({ type: 'run', subtype: 'start', timestamp: utils.now() });
     utils.save(record, file);
   try {

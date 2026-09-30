@@ -36,4 +36,10 @@ const defaultRecord: Partial<RunRecord> = {
   const body = `# Strata run ${record.run_id}\n\n\`\`\`json\n${JSON.stringify(record, null, 2)}\n\`\`\`\n`;
   fs.writeFileSync(temporary, body, { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(temporary, file);
+  const listener = record.onProgress as ((entry: any) => void) | undefined;
+  const sent = (record.progress_sent as number | undefined) ?? 0;
+  if (listener) {
+    for (const entry of record.progress.slice(sent)) listener(entry);
+    Object.defineProperty(record, 'progress_sent', { value: record.progress.length, writable: true, configurable: true });
+  }
 }
