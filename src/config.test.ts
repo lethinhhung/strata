@@ -13,6 +13,9 @@ test('config loads model defaults and configured workflow gates', () => {
     assert.equal(config.strong.command, 'codex');
     assert.equal(config.worker.command, 'opencode');
     assert.deepEqual(config.workflow.test_commands, []);
+    assert.equal(config.workflow.review_repair_attempts, 8);
+    assert.equal(config.workflow.test_repair_attempts, 8);
+    assert.equal(config.workflow.validation_repair_attempts, 8);
     writeFileSync(path.join(repo, '.strata.toml'), '[workflow]\ncheckpoint = true\ntest_commands = [["npm", "test"]]\n');
     assert.deepEqual(loadConfig(repo).workflow.test_commands, [['npm', 'test']]);
   } finally { rmSync(repo, { recursive: true, force: true }); }

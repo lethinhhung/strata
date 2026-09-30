@@ -28,9 +28,9 @@ export function loadWorkflow(raw: Partial<Workflow> = {}): Workflow {
   const quality = commandList(raw.quality_checks);
   const workflow: Workflow = {
     max_repairs: typeof raw.max_repairs === 'number' ? raw.max_repairs : 2,
-    review_repair_attempts: typeof raw.review_repair_attempts === 'number' ? raw.review_repair_attempts : 3,
-    test_repair_attempts: typeof raw.test_repair_attempts === 'number' ? raw.test_repair_attempts : 3,
-    validation_repair_attempts: typeof raw.validation_repair_attempts === 'number' ? raw.validation_repair_attempts : 2,
+    review_repair_attempts: typeof raw.review_repair_attempts === 'number' ? raw.review_repair_attempts : 8,
+    test_repair_attempts: typeof raw.test_repair_attempts === 'number' ? raw.test_repair_attempts : 8,
+    validation_repair_attempts: typeof raw.validation_repair_attempts === 'number' ? raw.validation_repair_attempts : 8,
     checkpoint: typeof raw.checkpoint === 'boolean' ? raw.checkpoint : true,
     checkpoint_prefix: typeof raw.checkpoint_prefix === 'string' ? raw.checkpoint_prefix : 'strata',
     spec_paths: Array.isArray(raw.spec_paths) ? raw.spec_paths.filter((item): item is string => typeof item === 'string') : ['specs'],

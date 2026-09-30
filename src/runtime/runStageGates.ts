@@ -1,4 +1,3 @@
-import * as utils from './utils.js';
 import { runChecks, setupChecks, workflowChecks } from './checks.js';
 import { repairGate } from './gateRepair.js';
 import { reviewWithRepairs } from './gateReview.js';
@@ -10,7 +9,7 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
   _implementationAttempt: any, _implementChanges: string[], sourceChanges: string[]) {
   const sourcePaths = [...sourceChanges];
   const reviewArgs = { repo, record, stage, config, file, context, coordination, sourceChanges: sourcePaths,
-    required: config.workflow.require_agent_gates, limit: config.workflow.review_repair_attempts ?? 3 };
+    required: config.workflow.require_agent_gates, limit: config.workflow.review_repair_attempts ?? 8 };
   const repair = async (role: 'implementation' | 'tests', findings: unknown, gate: string, task = '') => {
     const result = await repairGate(repo, record, stage, config, file, context, role, gate, findings, task);
     if (role === 'implementation') for (const target of result.changed) if (!sourcePaths.includes(target)) sourcePaths.push(target);
@@ -23,7 +22,7 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
   const checks = workflowChecks(config.workflow);
   const initialEvidence = [...setupEvidence, ...runChecks(repo, checks)];
   let tests = await runTestGate({ repo, record, stage, config, file, context, coordination, tester: initialTest.result,
-    testViolations: initialTest.violations, initialEvidence, limit: config.workflow.test_repair_attempts ?? 3, repair,
+    testViolations: initialTest.violations, initialEvidence, limit: config.workflow.test_repair_attempts ?? 8, repair,
     reviewAfterSourceRepair: async () => {
       review = await reviewWithRepairs({ ...reviewArgs, used: review.used, repair: (findings: unknown) => repair('implementation', findings, 'review') });
     } });
@@ -31,8 +30,13 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
   let validation = await validateStage({ repo, record, stage, config, file, context, coordination,
     review: review.review, tester: tests.tester, evidence: tests.evidence });
   let validationRepairs = 0;
-  while (config.workflow.require_agent_gates && !validation.passed && validationRepairs < (config.workflow.validation_repair_attempts ?? 2)) {
+  while (config.workflow.require_agent_gates && !validation.passed && validationRepairs < (config.workflow.validation_repair_attempts ?? 8)) {
     validationRepairs += 1;
+    if (validation.agent_error) {
+      validation = await validateStage({ repo, record, stage, config, file, context, coordination,
+        review: review.review, tester: tests.tester, evidence: tests.evidence });
+      continue;
+    }
     const route = await routeValidationRepair({ repo, record, stage, config, file, context, tester: tests.tester, evidence: tests.evidence }, validation.validation);
     const role = route.repair_role === 'tests' ? 'tests' : 'implementation';
     const repaired = await repair(role, { validation: validation.validation, evidence: tests.evidence }, 'validation', route.repair_task ?? '');
@@ -43,7 +47,7 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
       tests = { ...tests, tester: repaired.result, passed: false };
     }
     tests = await runTestGate({ repo, record, stage, config, file, context, coordination, tester: tests.tester,
-      testViolations: [], limit: (config.workflow.test_repair_attempts ?? 3) - tests.used, used: tests.used, repair,
+      testViolations: [], limit: (config.workflow.test_repair_attempts ?? 8) - tests.used, used: tests.used, repair,
       reviewAfterSourceRepair: async () => {
         review = await reviewWithRepairs({ ...reviewArgs, used: review.used, repair: (findings: unknown) => repair('implementation', findings, 'review') });
       } });

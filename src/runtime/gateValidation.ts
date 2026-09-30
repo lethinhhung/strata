@@ -7,17 +7,25 @@ export async function validateStage(args: any) {
   const before = utils.runSnapshot(repo, record, file);
   record.progress.push({ type: 'agent', subtype: 'validate', stage_id: stage.id, timestamp: utils.now() });
   utils.save(record, file);
-  const validation = await utils.askReadOnly(config, 'Validate Agent', {
-    repo,
-    text: `Validate contract coverage, review resolution, configured checks, rules, and scope. Do not edit. Engine gate_passed values are authoritative. A required test check must exist; a command that exits nonzero fails. Ignore unrelated dirty files and use the recorded stage path audit.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREQUIREMENTS:\n${utils.json(args.coordination.validation_requirements ?? [])}\nSTAGE PATH AUDIT:\n${utils.json(stagePathAudit(stage))}\nREVIEW:\n${utils.json(args.review)}\nTESTER:\n${utils.json(args.tester)}\nEVIDENCE:\n${utils.json(args.evidence)}`,
-  }, context, {});
+  let validation: any;
+  let agentError = false;
+  try {
+    validation = await utils.askReadOnly(config, 'Validate Agent', {
+      repo,
+      text: `Validate contract coverage, review resolution, configured checks, rules, and scope. Do not edit. Engine gate_passed values are authoritative. A required test check must exist; a command that exits nonzero fails. Ignore unrelated dirty files and use the recorded stage path audit.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREQUIREMENTS:\n${utils.json(args.coordination.validation_requirements ?? [])}\nSTAGE PATH AUDIT:\n${utils.json(stagePathAudit(stage))}\nREVIEW:\n${utils.json(args.review)}\nTESTER:\n${utils.json(args.tester)}\nEVIDENCE:\n${utils.json(args.evidence)}`,
+    }, context, {});
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    validation = { status: 'fail', summary: 'Validate Agent could not complete', findings: [message] };
+    agentError = true;
+  }
   const mutations = utils.changes(before, utils.runSnapshot(repo, record, file));
   helpers.addPhase(stage, 'validate', validation, { observed_changed_paths: mutations });
   utils.save(record, file);
   if (mutations.length) throw new RunError(`Validate Agent modified files: ${mutations.join(', ')}`);
   const passed = validation.status === 'pass';
   record.progress.push({ type: 'gate', subtype: 'validation', stage_id: stage.id, timestamp: utils.now(), passed });
-  return { validation, passed };
+  return { validation, passed, agent_error: agentError };
 }
 
 export async function routeValidationRepair(args: any, validation: any) {

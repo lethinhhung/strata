@@ -14,7 +14,7 @@ Own coordination and completion of one stage using a fresh, stage-specific conte
 - Convert stage criteria into scoped implementation and test tasks.
 - Sequence implementation, independent review, testing, validation, and checkpointing.
 - Inspect structured results and engine-derived evidence; never infer a pass from an agent claim.
-- Route failed review to the Implement Agent, source-caused test failures to the Implement Agent, test-authoring failures to the Test Agent, and validation failures to the role indicated by the findings. Retry each gate within its own configured repair budget and rerun the failed gate plus every downstream gate affected by the repair.
+- Route failed review to the Implement Agent, source-caused test failures to the Implement Agent, test-authoring failures to the Test Agent, and validation failures to the role indicated by the findings. Retry each gate within its own configurable repair budget (default 8 attempts) and rerun the failed gate plus every downstream gate affected by the repair. Record agent invocation errors as failed gate findings so they can be retried or routed for repair.
 - During repair, allow relevant files beyond the initial stage scope when needed to resolve concrete gate findings; preserve role boundaries and unrelated changes.
 - Halt the run on exhausted repairs, unavailable required evidence, or checkpoint failure; preserve diagnostic and resumable state.
 - Produce a concise structured stage report after checkpointing.

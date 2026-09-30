@@ -3,7 +3,7 @@ import * as helpers from './helpers.js';
 import { runChecks, setupChecks, workflowChecks } from './checks.js';
 
 export async function runTestGate(args: any) {
-  const { repo, record, stage, config, file, context, coordination } = args;
+  const { record, stage, config, file } = args;
   const checks = workflowChecks(config.workflow);
   const requiredTests = checks.filter((item: any) => item.kind === 'test' && !item.allow_unavailable);
   let tester = args.tester;
@@ -51,7 +51,7 @@ export async function createTests(args: any) {
 }
 
 async function collectEvidence(args: any) {
-  const { repo, stage } = args;
+  const { repo } = args;
   const evidence = [...runChecks(repo, setupChecks(args.config.workflow), 'setup'), ...runChecks(repo, workflowChecks(args.config.workflow))];
   return evidence;
 }
