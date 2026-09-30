@@ -1,5 +1,5 @@
 import * as utils from './utils.js';
-import { runChecks } from './checks.js';
+import { runChecks, setupChecks, workflowChecks } from './checks.js';
 import { RunRecord } from './types.js';
 
 export async function finalValidation(repo: string, record: any, config: any, file: string) {
@@ -39,23 +39,25 @@ const defaultRecord: Partial<RunRecord> = {
     shape: '{"status":"pass|fail","findings":[],"target_stage_id":"optional stage id"}',
     text: `Review epic criteria, cross-stage consistency, regressions, and architecture. Check the latest completed result for each stage. Earlier failed attempts are resolved when followed by a passing attempt and checkpoint; do not treat historical attempts as current failures. The target repository and its Git metadata are available, but do not change files. Use recorded observed changed paths, completed phase results, checkpoint identity, and engine check evidence to assess the work. Return a target_stage_id only for a substantive unresolved issue in completed work.\nEPIC:\n${record.epic}\nSTAGE RESULTS:\n${utils.json(record.stages)}`,
   }, context, { strong: true });
-  const evidence = [...runChecks(repo, config.workflow.test_commands, 'final_test'), ...runChecks(repo, config.workflow.quality_checks, 'final_quality')];
+  const checks = workflowChecks(config.workflow);
+  const evidence = [...runChecks(repo, setupChecks(config.workflow), 'setup'), ...runChecks(repo, checks, 'final')];
   const beforeValidator = utils.runSnapshot(repo, record, file);
   record.progress.push({ type: 'agent', subtype: 'validate', stage_id: 'epic', timestamp: utils.now() });
   utils.save(record, file);
   const validator = await utils.askReadOnly(config, 'Validate Agent', {
     repo,
     shape: '{"status":"pass|fail","findings":[],"gates":[{"name":"...","passed":true,"evidence":"..."}]}',
-    text: `Read-only final validation of epic criteria, stage results, review findings, test evidence, configured quality checks, repository rules, and plan integrity. Missing or skipped required checks fail. Do not edit files. Each stage's recorded phase paths are the authoritative audit of changes made or attempted by that stage. Do not treat unrelated files currently dirty in the worktree as changes made by a stage. Discarded out-of-scope agent writes are recorded in phase results and must still fail the relevant stage.\nEPIC:\n${record.epic}\nSTAGES:\n${utils.json(record.stages)}\nEPIC REVIEW:\n${utils.json(review)}\nENGINE EVIDENCE:\n${utils.json(evidence)}`,
+    text: `Read-only final validation of epic criteria, stage results, review findings, configured repository checks, rules, and plan integrity. Strata has already applied each check's unavailable policy; use gate_passed as authoritative. A command that runs and exits nonzero fails even when its unavailable policy allows a missing executable. A required test check must be configured. Do not edit files. Stage path audits are authoritative for stage changes; ignore unrelated dirty files.\nEPIC:\n${record.epic}\nSTAGES:\n${utils.json(record.stages)}\nEPIC REVIEW:\n${utils.json(review)}\nENGINE EVIDENCE:\n${utils.json(evidence)}`,
   }, context, {});
   const validatorMutations = utils.changes(beforeValidator, utils.runSnapshot(repo, record, file));
   record.final_review = review;
   record.final_validation = { result: validator, observed_changed_paths: validatorMutations };
   record.final_evidence = evidence;
   record.final_validated_at = utils.now();
-  const passed = review.status === 'pass' && !(review.findings ?? []).length &&
-    validator.status === 'pass' && !validatorMutations.length &&
-    config.workflow.test_commands.length > 0 && evidence.some((item: any) => item.kind === 'final_test') && evidence.every((item: any) => item.passed);
+  const agentGatesPassed = !config.workflow.require_agent_gates ||
+    (review.status === 'pass' && !(review.findings ?? []).length && validator.status === 'pass');
+  const passed = agentGatesPassed && !validatorMutations.length &&
+    checks.some((item: any) => item.kind === 'test' && !item.allow_unavailable) && evidence.every((item: any) => item.gate_passed);
   record.progress.push({ type: 'gate', subtype: 'validation', stage_id: 'epic', timestamp: utils.now(), passed });
   utils.save(record, file);
   return { passed, review, evidence };

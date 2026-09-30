@@ -25,15 +25,33 @@ Commit the config and epic inputs before starting a run if either is new or chan
 
 Connect the NVIDIA key in OpenCode by running `opencode`, entering `/connect`, selecting NVIDIA, and pasting the key. Then run `opencode models` and copy an available model ID into `models.worker.model`. Set `models.strong.model` to the Codex model you want. Model values can be overridden for a shell session with `STRATA_STRONG_MODEL` or `STRATA_WORKER_MODEL`. Never put API keys in `.strata.toml`.
 
-Configure checks for the repository where Strata will run. Commands are argument arrays, executed without a shell. For example:
+Configure checks for the repository where Strata will run. Commands are argument arrays, executed without a shell. The legacy `test_commands` and `quality_checks` arrays remain supported and are treated as required checks. For per-check IDs and explicit handling when a tool is not installed, use `workflow.checks`:
 
 ```toml
 [workflow]
-test_commands = [["npm", "test", "--", "--runInBand"]]
-quality_checks = [["npm", "run", "lint"], ["npm", "run", "typecheck"]]
+setup_commands = [["pnpm", "install", "--frozen-lockfile"]]
+
+[[workflow.checks]]
+id = "unit-tests"
+kind = "test"
+command = ["pnpm", "test", "--", "--runInBand"]
+
+[[workflow.checks]]
+id = "typecheck"
+kind = "quality"
+command = ["pnpm", "run", "typecheck"]
+
+[[workflow.checks]]
+id = "ios-release-build"
+kind = "quality"
+command = ["xcodebuild", "-scheme", "Snapnote", "-configuration", "Release", "archive"]
+allow_unavailable = true
+unavailable_reason = "The iOS release build requires macOS and is covered by the macOS CI job."
 ```
 
-The test command is required for a stage to pass. Configure only checks that exist in the target repository. `max_repairs` bounds repair attempts after the initial gate attempt. Each repair receives the recorded review, test, and validation findings; the Implement Agent can fix source causes, the Test Agent can adjust test coverage or expectations, and Strata reruns the gates before checkpointing. Stage commits and the final annotated epic tag are required checkpoints.
+`setup_commands` run before the Test Agent and configured checks, so agents see dependency/setup failures as evidence and can repair their cause. At least one test check must be required. A check is required by default. `allow_unavailable = true` with a specific reason permits only a missing executable (`ENOENT`); if the command runs and exits nonzero, the check fails and enters the repair loop. The decision and evidence are recorded per check. `max_repairs` bounds repair attempts after the initial gate attempt. Each repair receives the recorded findings; agents can fix the cause, while only Strata applies the configured command gate before checkpointing. Stage commits and the final annotated epic tag are required checkpoints.
+
+Review, Test, and Validate agent pass/fail judgments are required by default. Set `require_agent_gates = false` when a repository wants those judgments recorded as feedback while configured command checks and scope protections remain hard gates.
 
 ## Run an epic
 

@@ -65,6 +65,17 @@ export interface Workflow {
   memory_policy: string;
   quality_checks: string[][];
   test_commands: string[][];
+  setup_commands: string[][];
+  require_agent_gates: boolean;
+  checks?: WorkflowCheck[];
+}
+
+export interface WorkflowCheck {
+  id: string;
+  kind: 'test' | 'quality';
+  command: string[];
+  allow_unavailable: boolean;
+  unavailable_reason: string;
 }
 
 export function loadConfig(repo: string, explicit?: string): LoadedConfig {
@@ -84,6 +95,9 @@ export function loadConfig(repo: string, explicit?: string): LoadedConfig {
       memory_policy: typeof workflowRaw.memory_policy === 'string' ? workflowRaw.memory_policy : '',
       quality_checks: commandList(workflowRaw.quality_checks),
       test_commands: commandList(workflowRaw.test_commands),
+      setup_commands: commandList(workflowRaw.setup_commands),
+      require_agent_gates: typeof workflowRaw.require_agent_gates === 'boolean' ? workflowRaw.require_agent_gates : true,
+      checks: configuredChecks(workflowRaw.checks, commandList(workflowRaw.test_commands), commandList(workflowRaw.quality_checks)),
     };
     
     if (!Number.isInteger(workflow.max_repairs) || workflow.max_repairs < 0) throw new Error('workflow.max_repairs must be a non-negative integer');
@@ -110,4 +124,33 @@ function commandList(value: unknown): string[][] {
     }
     return command.map(String);
   });
+}
+
+function configuredChecks(value: unknown, tests: string[][], quality: string[][]): WorkflowCheck[] {
+  const legacy = [
+    ...tests.map((command, index) => ({ id: `test-${index + 1}`, kind: 'test' as const, command, allow_unavailable: false, unavailable_reason: '' })),
+    ...quality.map((command, index) => ({ id: `quality-${index + 1}`, kind: 'quality' as const, command, allow_unavailable: false, unavailable_reason: '' })),
+  ];
+  if (value === undefined || (Array.isArray(value) && value.length === 0 && legacy.length > 0)) return legacy;
+  if (!Array.isArray(value)) throw new Error('workflow.checks must be an array of check tables');
+  const checks = value.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`workflow.checks[${index}] must be a table`);
+    const check = item as Record<string, unknown>;
+    const id = typeof check.id === 'string' ? check.id.trim() : '';
+    const kind = check.kind;
+    if (!id || (kind !== 'test' && kind !== 'quality')) throw new Error(`workflow.checks[${index}] requires an id and kind "test" or "quality"`);
+    const checkKind: WorkflowCheck['kind'] = kind;
+    const command = commandList([check.command])[0];
+    if (typeof check.allow_unavailable !== 'undefined' && typeof check.allow_unavailable !== 'boolean') throw new Error(`workflow.checks[${index}].allow_unavailable must be a boolean`);
+    const allowUnavailable = check.allow_unavailable === true;
+    const unavailableReason = typeof check.unavailable_reason === 'string' ? check.unavailable_reason.trim() : '';
+    if (allowUnavailable && !unavailableReason) throw new Error(`workflow.checks[${index}] needs unavailable_reason when allow_unavailable is true`);
+    return { id, kind: checkKind, command, allow_unavailable: allowUnavailable, unavailable_reason: unavailableReason };
+  });
+  const ids = new Set<string>();
+  for (const check of checks) {
+    if (ids.has(check.id)) throw new Error(`Duplicate workflow check id: ${check.id}`);
+    ids.add(check.id);
+  }
+  return checks;
 }
