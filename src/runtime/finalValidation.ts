@@ -46,7 +46,7 @@ const defaultRecord: Partial<RunRecord> = {
   const validator = await utils.askReadOnly(config, 'Validate Agent', {
     repo,
     shape: '{"status":"pass|fail","findings":[],"gates":[{"name":"...","passed":true,"evidence":"..."}]}',
-    text: `Read-only final validation of epic criteria, stage results, review findings, test evidence, configured quality checks, repository rules, and plan integrity. Missing or skipped required checks fail. Do not edit files.\nEPIC:\n${record.epic}\nSTAGES:\n${utils.json(record.stages)}\nEPIC REVIEW:\n${utils.json(review)}\nENGINE EVIDENCE:\n${utils.json(evidence)}`,
+    text: `Read-only final validation of epic criteria, stage results, review findings, test evidence, configured quality checks, repository rules, and plan integrity. Missing or skipped required checks fail. Do not edit files. Each stage's recorded phase paths are the authoritative audit of changes made or attempted by that stage. Do not treat unrelated files currently dirty in the worktree as changes made by a stage. Discarded out-of-scope agent writes are recorded in phase results and must still fail the relevant stage.\nEPIC:\n${record.epic}\nSTAGES:\n${utils.json(record.stages)}\nEPIC REVIEW:\n${utils.json(review)}\nENGINE EVIDENCE:\n${utils.json(evidence)}`,
   }, context, {});
   const validatorMutations = utils.changes(beforeValidator, utils.runSnapshot(repo, record, file));
   record.final_review = review;

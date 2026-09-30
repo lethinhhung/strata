@@ -43,7 +43,12 @@ const defaultRecord: Partial<RunRecord> = {
       record.progress.push({ type: 'run', subtype: 'fail', timestamp: utils.now() });
       throw new RunError(`Stage ${stage.id} dependencies are incomplete`);
     }
-    await runStageWithRepairs(repo, record, stage, config, file, stage.failure ?? '');
+    const previousFailure = [...record.attempts].reverse().find((attempt: any) =>
+      attempt.stage_id === stage.id && !attempt.passed);
+    const repairContext = previousFailure?.findings
+      ? utils.json(previousFailure.findings)
+      : stage.failure ?? '';
+    await runStageWithRepairs(repo, record, stage, config, file, repairContext);
   }
   let final = await finalValidation(repo, record, config, file);
   let repairs = 0;

@@ -36,7 +36,8 @@ const defaultRecord: Partial<RunRecord> = {
   // made after the run began. Commit only this stage's paths and leave the rest
   // untouched; runStage enforces ownership on changes made during each phase.
   const eligible = changed.filter((filePath: string) =>
-    !filePath.startsWith('specs/') && !filePath.startsWith('docs/temps/') && inScope(filePath, stage.scope ?? []));
+    !filePath.startsWith('specs/') && !filePath.startsWith('docs/temps/') &&
+    (inScope(filePath, stage.scope ?? []) || (stage.test_repair_paths ?? []).includes(filePath)));
   if (config.workflow.checkpoint) {
     if (!eligible.length && !stage.checkpoint_commit) throw new RunError(`No files to checkpoint for stage ${stage.id}`);
     if (eligible.length) {
