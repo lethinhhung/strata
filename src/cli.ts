@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, initConfig, loadConfig } from './config.js';
 import { loadRun, recordPath, resumeRun, RunError, startRun } from './runtime.js';
+import { formatFailure, formatOutcome, printProgress } from './progress.js';
 
 const version = '0.1.0';
 const usage = `Strata — specification-led feature implementation runtime
@@ -84,15 +85,15 @@ async function main(): Promise<number> {
   const config = loadConfig(repo, options.config);
   if (command === 'run') {
     if (!positional[1]) throw new Error('run requires an epic file');
-    const record = await startRun(repo, positional[1], config);
-    console.log(`Run ${record.run_id}: ${record.status} — ${recordPath(repo, record.run_id)}`);
+    const record = await startRun(repo, positional[1], config, printProgress);
+    console.log(formatOutcome('run', record, recordPath(repo, record.run_id)));
     return record.status === 'complete' ? 0 : 1;
   }
   if (command === 'resume') {
     if (!positional[1]) throw new Error('resume requires a run id or record path');
     const file = resolveRun(repo, positional[1]);
-    const record = await resumeRun(repo, file, config);
-    console.log(`Run ${record.run_id}: ${record.status} — ${file}`);
+    const record = await resumeRun(repo, file, config, printProgress);
+    console.log(formatOutcome('resume', record, file));
     return record.status === 'complete' ? 0 : 1;
   }
   throw new Error(`Unknown command ${command ?? '(empty)'}`);
@@ -101,7 +102,7 @@ async function main(): Promise<number> {
 const invokedFile = process.argv[1] ? fs.realpathSync(process.argv[1]) : '';
 if (invokedFile === fileURLToPath(import.meta.url)) {
   main().then((code) => { process.exitCode = code; }).catch((error) => {
-    console.error(`strata: ${error.message}`);
+    console.error(formatFailure(error));
     process.exitCode = 2;
   });
 }
