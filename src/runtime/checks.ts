@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import type { WorkflowCheck } from '../config.js';
+import type { WorkflowCheck } from '../workflowConfig.js';
 
 export function workflowChecks(workflow: any): WorkflowCheck[] {
   if (Array.isArray(workflow.checks) && (workflow.checks.length > 0 || (!workflow.test_commands?.length && !workflow.quality_checks?.length))) return workflow.checks;
