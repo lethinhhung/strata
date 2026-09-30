@@ -3,50 +3,50 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { invoke, ProviderError } from '../providers.js';
 import { isTransientFailure } from '../providerRetry.js';
-import { copyWorkspace, workspaceFiles } from './workspace.js';
+import { copyWorkspace, restoreWorkspacePaths, workspaceFiles } from './workspace.js';
 import { parseObject } from './parse.js';
 
 export async function askScoped(config: any, role: string, task: any, context: string, options: { allowedPath?: (file: string) => boolean; strong?: boolean } = {}) {
   const { allowedPath = () => false, strong = false } = options;
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'strata-worker-'));
+  const backup = fs.mkdtempSync(path.join(os.tmpdir(), 'strata-backup-'));
   try {
-    copyWorkspace(task.repo, workspace);
-    const before = workspaceFiles(workspace);
+    copyWorkspace(task.repo, backup);
+    const before = workspaceFiles(task.repo);
     let result;
     try {
-      result = await ask(config, role, { ...task, repo: workspace }, context, { strong, skipGitRepoCheck: true });
+      result = await ask(config, role, task, context, { strong });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       result = { status: 'fail', summary: message, findings: [message], changed_paths: [], commands: [] };
     }
-    const after = workspaceFiles(workspace);
-const attempted = Array.from(new Set([...Array.from(before.keys()), ...Array.from(after.keys())]))
-    .filter((file) => before.get(file) !== after.get(file))
-    .sort();
+    const after = workspaceFiles(task.repo);
+    const attempted = Array.from(new Set([...Array.from(before.keys()), ...Array.from(after.keys())]))
+      .filter((file) => before.get(file) !== after.get(file))
+      .sort();
     const applied = attempted.filter((file) => allowedPath(file) && after.get(file) !== 'symlink');
     const discarded = attempted.filter((file) => !allowedPath(file) || after.get(file) === 'symlink');
-    for (const file of applied) {
-      const source = path.join(workspace, file);
-      const target = path.join(task.repo, file);
-      if (after.has(file)) {
-        fs.mkdirSync(path.dirname(target), { recursive: true });
-        fs.copyFileSync(source, target);
-        fs.chmodSync(target, fs.statSync(source).mode & 0o777);
-      } else fs.rmSync(target, { force: true });
-    }
+    restoreWorkspacePaths(backup, task.repo, discarded);
     return { result, attempted, applied, discarded };
   } finally {
-    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(backup, { recursive: true, force: true });
   }
 }
 
 export async function askReadOnly(config: any, role: string, task: any, context: string, options: any = {}) {
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'strata-readonly-'));
+  const backup = fs.mkdtempSync(path.join(os.tmpdir(), 'strata-backup-'));
   try {
-    copyWorkspace(task.repo, workspace);
-    return await ask(config, role, { ...task, repo: workspace }, context, { ...options, skipGitRepoCheck: true });
+    copyWorkspace(task.repo, backup);
+    const before = workspaceFiles(task.repo);
+    try {
+      return await ask(config, role, task, context, options);
+    } finally {
+      const after = workspaceFiles(task.repo);
+      const changed = Array.from(new Set([...before.keys(), ...after.keys()]))
+        .filter((file) => before.get(file) !== after.get(file));
+      restoreWorkspacePaths(backup, task.repo, changed);
+    }
   } finally {
-    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(backup, { recursive: true, force: true });
   }
 }
 

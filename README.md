@@ -44,7 +44,7 @@ strata status 20260928T120000Z-a1b2c3d4
 strata resume 20260928T120000Z-a1b2c3d4
 ```
 
-Planning finishes before implementation. Each stage runs exploration, stage coordination, implementation, independent review, tests, validation, and checkpointing. Gate decisions require executed test and configured quality-check evidence. Stages run in dependency order with stable identities. Successful stage commits include their stage and checkpoint IDs.
+Planning finishes before implementation. Agents and configured checks run in the Git worktree selected by `--repo`; agent edits are checked against their stage scope there. Each stage runs exploration, stage coordination, implementation, independent review, tests, validation, and checkpointing. Gate decisions require executed test and configured quality-check evidence. Stages run in dependency order with stable identities. Successful stage commits include their stage and checkpoint IDs.
 
 Run records are saved after each state change at `docs/temps/<UTC timestamp>-<run id>.md` with structured JSON in a fenced block. They contain the plan, handoffs, phase results, repair attempts, gate evidence, and checkpoints. Resume uses the saved plan and skips completed stages. An interrupted stage without a checkpoint restarts from its saved contract. Failed runs preserve their records. After final integration validation, the Archivist runs once; archival failures are recorded without changing the successful run status.
 
