@@ -64,9 +64,9 @@ const retainedSourceChanges = [...Array.from(utils.runSnapshot(repo, record, fil
     attempted_changed_paths: implementationAttempt.attempted,
     discarded_changed_paths: implementationAttempt.discarded,
   });
-  const implementationViolations = implementChanges.filter((filePath: string) =>
-    (repairIsTestOnly ? !helpers.isTestPath(filePath) : helpers.isTestPath(filePath)) || filePath.startsWith('specs/') || filePath === record.epic_path || !helpers.inScope(filePath, stage.scope));
+  const implementationViolations = implementationAttempt.discarded;
   utils.save(record, file);
+  if (implementationViolations.length) throw new RunError(`Implementer attempted files outside its scope: ${implementationViolations.join(', ')}`);
   if (implementation.status !== 'pass' || (!repairIsTestOnly && !effectiveImplementChanges.length)) {
     const discarded = implementationAttempt.discarded.length
       ? `; discarded out-of-role writes: ${implementationAttempt.discarded.join(', ')}` : '';

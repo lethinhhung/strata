@@ -1,0 +1,4 @@
+
+## Note — 2026-09-29
+
+Date: 2026-09-29. Observation: progress persistence and display use a typed discriminated `ProgressEntry` union in `src/runtime/progress.ts` and `RunRecord.progress` in `src/runtime/records.ts`; `startRun` and `resumeRun` accept an optional callback, and the CLI passes `printProgress` to both before formatting the final outcome. A persisted transition log with a callback lets the runtime own event recording while the CLI renders events as they occur. A CLI test can directly verify formatter output, outcomes, and diagnostic visibility without importing the unexported CLI `main`. A prior CLI test harness using unsupported Node mock APIs and `main` failed compilation; the final `npm test` and `npm run typecheck` passed. Affected paths: `src/runtime/progress.ts`, `src/runtime/records.ts`, `src/runtime/startRun.ts`, `src/runtime/resumeRun.ts`, `src/progress.ts`, `src/cli.ts`, `src/cli.test.ts`. Run: `20260929T035017Z-26a3cc57`.

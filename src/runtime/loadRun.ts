@@ -4,7 +4,7 @@ import { RunError, RunRecord } from './types.js';
 export function loadRun(file: string): RunRecord {
    const contents = readFileSync(file, 'utf8');
    const fenced = contents.match(/```json\s*([\s\S]*?)```/i);
-   let record = JSON.parse(fenced?.[1] ?? contents);
+   const record = JSON.parse(fenced?.[1] ?? contents);
    if (record.schema_version !== 1) throw new RunError(`Unsupported run record version: ${file}`);
    // Ensure progress field exists for backward compatibility
    if (!('progress' in record) || !Array.isArray(record.progress)) {

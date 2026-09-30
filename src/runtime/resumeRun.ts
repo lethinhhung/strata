@@ -1,4 +1,4 @@
-import { RunError, RunRecord } from './types.js';
+import { RunError } from './types.js';
 import { executeRun } from './executeRun.js';
 import { loadRun } from './loadRun.js';
 import * as utils from './utils.js';
@@ -6,7 +6,7 @@ import * as path from 'node:path';
 
 export async function resumeRun(repo: string, runFile: string, config: any, onProgress?: (entry: any) => void) {
     const file = path.isAbsolute(runFile) ? runFile : path.resolve(repo, runFile);
-    let record = loadRun(file);
+    const record = loadRun(file);
     if (onProgress) Object.defineProperty(record, 'onProgress', { value: onProgress, configurable: true });
     // Ensure progress field exists for backward compatibility
     if (!('progress' in record) || !Array.isArray(record.progress)) {
