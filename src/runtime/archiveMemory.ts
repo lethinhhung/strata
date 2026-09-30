@@ -8,8 +8,6 @@ export async function archiveMemory(repo: string, record: any, config: any) {
    if (!('progress' in record) || !Array.isArray(record.progress)) {
      record.progress = [];
    }
-   // Record archive agent transition
-   record.progress.push({ type: 'agent', subtype: 'archive', stage_id: 'epic', timestamp: utils.now() });
 const defaultRecord: Partial<RunRecord> = {
      created_at: '',
      repository: '',

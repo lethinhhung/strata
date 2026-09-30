@@ -45,17 +45,20 @@ const record: RunRecord = {
     record.progress.push({ type: 'run', subtype: 'start', timestamp: utils.now() });
     utils.save(record, file);
   try {
-    record.progress.push({ type: 'agent', subtype: 'epic_coordinator', stage_id: 'epic', timestamp: utils.now() });
-    utils.save(record, file);
-    const plan = await utils.askReadOnly(config, 'Epic Coordinator', {
-      repo,
-      shape: '{"summary":"...","decisions":[...],"stages":[{"id":"...","title":"...","concern":"...","scope":["path or glob"],"dependencies":[],"completion_criteria":[...],"checkpoint":"stable identity"}]',
-      text: `Inspect the supplied epic, repository snapshot, specifications, and advisory memory. Make architecture decisions and finish the stable stage plan before implementation. Every scope must be a non-empty list of repository paths or glob patterns. Each stage must include production source paths; include related test paths in that same stage scope when tests are needed. Never create a test-only stage. The Implement Agent owns production paths and the Test Agent owns test paths. Do not implement.\nEPIC:\n${epic}\n\nSPECIFICATIONS:\n${specs}\n\nADVISORY MEMORY:\n${memory}\n\nBranch: ${utils.git(repo, ['branch', '--show-current']).stdout.trim()}\nTracked files:\n${utils.git(repo, ['ls-files']).stdout.slice(0, 20_000)}`,
-    }, specs, { strong: true });
-    record.plan = { summary: plan.summary ?? '', decisions: plan.decisions ?? [] };
-    record.stages = utils.validatePlan(plan);
-    record.status = 'planned';
-    utils.save(record, file);
+const epicCoordStart = Date.now();
+     const plan = await utils.askReadOnly(config, 'Epic Coordinator', {
+       repo,
+       shape: '{"summary":"...","decisions":[...],"stages":[{"id":"...","title":"...","concern":"...","scope":["path or glob"],"dependencies":[],"completion_criteria":[...],"checkpoint":"stable identity"}]',
+       text: `Inspect the supplied epic, repository snapshot, specifications, and advisory memory. Make architecture decisions and finish the stable stage plan before implementation. Every scope must be a non-empty list of repository paths or glob patterns. Each stage must include production source paths; include related test paths in that same stage scope when tests are needed. Never create a test-only stage. The Implement Agent owns production paths and the Test Agent owns test paths. Do not implement.\nEPIC:\n${epic}\n\nSPECIFICATIONS:\n${specs}\n\nADVISORY MEMORY:\n${memory}\n\nBranch: ${utils.git(repo, ['branch', '--show-current']).stdout.trim()}\nTracked files:\n${utils.git(repo, ['ls-files']).stdout.slice(0, 20_000)}`,
+     }, specs, { strong: true });
+     const epicCoordEnd = Date.now();
+     const epicCoordDuration = epicCoordEnd - epicCoordStart;
+     record.progress.push({ type: 'agent', subtype: 'epic_coordinator', stage_id: 'epic', timestamp: utils.now(), duration_ms: epicCoordDuration });
+     utils.save(record, file);
+     record.plan = { summary: plan.summary ?? '', decisions: plan.decisions ?? [] };
+     record.stages = utils.validatePlan(plan);
+     record.status = 'planned';
+     utils.save(record, file);
     await executeRun(repo, record, config, file);
     return record;
   } catch (error) {

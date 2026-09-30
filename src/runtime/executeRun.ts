@@ -78,12 +78,24 @@ const defaultRecord: Partial<RunRecord> = {
   record.completed_at = utils.now();
   record.progress.push({ type: 'run', subtype: 'complete', timestamp: utils.now() });
   utils.save(record, file);
-  try {
-    record.archival = await archiveMemory(repo, record, config);
-  } catch (error) {
-    record.archival = { status: 'failed', reason: error instanceof Error ? error.message : String(error) };
-  }
-  utils.save(record, file);
+const archiveStart = Date.now();
+   let archiveError = null;
+   let archivalResult;
+   try {
+     archivalResult = await archiveMemory(repo, record, config);
+   } catch (error) {
+     archiveError = error;
+   } finally {
+     const archiveEnd = Date.now();
+     const archiveDuration = archiveEnd - archiveStart;
+     record.progress.push({ type: 'agent', subtype: 'archive', stage_id: 'epic', timestamp: utils.now(), duration_ms: archiveDuration });
+   }
+   if (archiveError) {
+     record.archival = { status: 'failed', reason: archiveError instanceof Error ? archiveError.message : String(archiveError) };
+   } else {
+     record.archival = archivalResult;
+   }
+   utils.save(record, file);
 }
 
 function hasCheckpoint(repo: string, stage: any, config: any) {
