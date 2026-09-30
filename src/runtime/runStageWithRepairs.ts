@@ -77,10 +77,14 @@ export function repairIsTestOnly(context: unknown) {
     try { findings = JSON.parse(context); } catch { findings = context; }
   }
   if (findings && typeof findings === 'object' && !Array.isArray(findings)) {
-    const productionReviews = (findings.review ?? []).filter((item: any) => !isTestFinding(item));
     const implementationIssues = (findings.implementation ?? []).filter(isSubstantiveSourceFinding);
-    const sourceIssues = [...implementationIssues, ...(findings.source ?? []), ...productionReviews];
+    const sourceIssues = [...implementationIssues, ...(findings.source ?? [])];
     if (sourceIssues.length) return false;
+    const testGateFailed = (findings.evidence ?? []).some((item: any) => item.kind === 'test' && !item.passed);
+    const testAgentReportedFailure = (findings.test ?? []).some(isTestFinding);
+    if (testGateFailed || testAgentReportedFailure) return true;
+    const productionReviews = (findings.review ?? []).filter((item: any) => !isTestFinding(item));
+    if (productionReviews.length) return false;
     const reviewIssues = findings.final_review?.findings ?? findings.final_review ?? [];
     const validationIssues = findings.validation?.findings ?? findings.validation ?? [];
     const testIssues = [...(findings.test ?? []), ...(Array.isArray(reviewIssues) ? reviewIssues : []), ...(Array.isArray(validationIssues) ? validationIssues : [])];
@@ -95,7 +99,7 @@ export function repairIsTestOnly(context: unknown) {
 function isTestFinding(item: any) {
   const file = item && typeof item === 'object' ? item.path ?? item.file ?? '' : '';
   const detail = `${file} ${item?.message ?? item?.description ?? item ?? ''}`;
-  return helpers.isTestPath(file) || /missing test coverage|test assertion|test expectation|tests? (?:are )?failing/i.test(detail);
+  return helpers.isTestPath(file) || /missing test coverage|test assertion|test expectation|tests? (?:are )?failing|(?:failed|failing|failure).{0,80}(?:tests?|suites?|jest)|(?:tests?|suites?|jest).{0,80}(?:failed|failing|failure)|jest.{0,80}(?:error|fail|missing)/i.test(detail);
 }
 
 function isSubstantiveSourceFinding(item: any) {

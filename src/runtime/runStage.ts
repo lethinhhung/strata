@@ -41,25 +41,25 @@ export async function runStage(repo: string, record: any, stage: any, config: an
       ? `Repair only the reported test expectations or coverage. Edit test files only; do not change production source.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.test_task}\nREPAIR FINDINGS:\n${repairContext}`
       : `Implement the source change within this stage scope. Edit production source files only. Do not edit tests, specs, memory, run records, or unrelated files, even if the coordinator task asks for test edits; those belong to the Test Agent. Return observed changed paths and checks. If this is a repair, fix only the reported source findings.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.implementation_task}\nREPAIR FINDINGS:\n${repairContext}`,
   }, specContext, {
-    allowedPath: (filePath: string) => (repairIsTestOnly ? helpers.isTestPath(filePath) : !helpers.isTestPath(filePath)) &&
-      !filePath.startsWith('specs/') && filePath !== record.epic_path && helpers.inScope(filePath, stage.scope),
+    allowedPath: (filePath: string) => isAllowedRolePath(filePath, repairIsTestOnly, stage, record),
   });
   const implementation = implementationAttempt.result;
   const implementChanges = utils.changes(beforeImplement, utils.runSnapshot(repo, record, file));
   // Retained in-scope edits count when a repair makes no further source changes.
 const retainedSourceChanges = [...Array.from(utils.runSnapshot(repo, record, file).keys())]
-     .filter((filePath: string) => !helpers.isTestPath(filePath) && !filePath.startsWith('specs/') &&
-       filePath !== record.epic_path && helpers.inScope(filePath, stage.scope));
+     .filter((filePath: string) => isAllowedRolePath(filePath, repairIsTestOnly, stage, record));
   if (stage.checkpoint_commit) {
     const checkpointedPaths = utils.git(repo, ['show', '--format=', '--name-only', stage.checkpoint_commit]).stdout
       .split('\n').map((filePath: string) => filePath.trim()).filter(Boolean)
-      .filter((filePath: string) => !helpers.isTestPath(filePath) && !filePath.startsWith('specs/') &&
-        filePath !== record.epic_path && helpers.inScope(filePath, stage.scope));
+      .filter((filePath: string) => isAllowedRolePath(filePath, repairIsTestOnly, stage, record));
     retainedSourceChanges.push(...checkpointedPaths);
   }
   const uniqueRetainedSourceChanges = Array.from(new Set(retainedSourceChanges)).sort();
   const effectiveImplementChanges = (repairIsTestOnly ? uniqueRetainedSourceChanges : implementChanges.length ? implementChanges : uniqueRetainedSourceChanges).filter((filePath: string) =>
-    !helpers.isTestPath(filePath) && !filePath.startsWith('specs/') && filePath !== record.epic_path && helpers.inScope(filePath, stage.scope));
+    isAllowedRolePath(filePath, repairIsTestOnly, stage, record));
+  if (repairIsTestOnly) {
+    stage.test_repair_paths = Array.from(new Set([...(stage.test_repair_paths ?? []), ...effectiveImplementChanges]));
+  }
   helpers.addPhase(stage, 'implement', implementation, {
     observed_changed_paths: implementChanges,
     attempted_changed_paths: implementationAttempt.attempted,
@@ -75,4 +75,11 @@ const retainedSourceChanges = [...Array.from(utils.runSnapshot(repo, record, fil
   }
   return runStageGates(repo, record, stage, config, file, specContext, coordination, repairIsTestOnly,
     implementation, implementationAttempt, implementChanges, effectiveImplementChanges);
+}
+
+function isAllowedRolePath(filePath: string, testOnly: boolean, stage: any, record: any) {
+  if (helpers.isTestPath(filePath) !== testOnly || filePath.startsWith('specs/') || filePath === record.epic_path) return false;
+  // A test-only repair may need to fix an existing failing test outside the
+  // original implementation scope. Production edits remain stage-scoped.
+  return testOnly || helpers.inScope(filePath, stage.scope);
 }
