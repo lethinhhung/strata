@@ -17,7 +17,10 @@ export async function repairGate(repo: string, record: any, stage: any, config: 
     text: `Repair the ${gate} gate (repair ${attempt}) using the exact findings and evidence below. Work only on the assigned role's files and stay within stage scope. Fix the underlying cause; never weaken a test or hide a production defect. After edits, report what changed and what still blocks the gate.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nROUTED TASK:\n${task}\nGATE FINDINGS:\n${utils.json(findings)}`,
   }, context, {
     allowedPath: (target: string) => role === 'tests'
-      ? helpers.isTestPath(target) && helpers.inScope(target, stage.scope)
+      // Test repairs may need to fix a failing test outside the stage's
+      // production/configuration scope. Keep the role boundary strict while
+      // allowing the Test Agent to edit test files anywhere in the repository.
+      ? helpers.isTestPath(target)
       : !helpers.isTestPath(target) && !target.startsWith('specs/') && target !== record.epic_path && helpers.inScope(target, stage.scope),
   });
   const changed = utils.changes(before, utils.runSnapshot(repo, record, file));

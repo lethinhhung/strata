@@ -39,7 +39,7 @@ export async function createTests(args: any) {
   const tested = await utils.askScoped(config, 'Test Agent', {
     repo,
     text: `Create deterministic tests for this stage; edit test files only. Setup commands ran before this phase. If setup failed, report the exact blocker. Do not claim checks passed without evidence.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nTASK:\n${coordination.test_task}\nSETUP EVIDENCE:\n${utils.json(setupEvidence)}\nREVIEW FINDINGS:\n${utils.json(review.findings ?? [])}`,
-  }, context, { allowedPath: (target: string) => helpers.isTestPath(target) && helpers.inScope(target, stage.scope) });
+  }, context, { allowedPath: (target: string) => helpers.isTestPath(target) });
   const changed = utils.changes(before, utils.runSnapshot(repo, record, file));
   const violations = [...changed.filter((target: string) => !helpers.isTestPath(target)), ...tested.discarded];
   helpers.addPhase(stage, 'test', tested.result, {
