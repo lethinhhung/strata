@@ -12,6 +12,7 @@ Implement or repair source changes for one assigned stage task.
 - Inspect existing patterns and make the smallest change that satisfies the task.
 - Keep edits within assigned scope and report changed paths and commands run.
 - Surface ambiguity, risks, and incomplete work explicitly.
+- When called for gate repair, address the supplied findings directly and report which finding each edit resolves.
 
 ## Boundaries
 - Does not change specifications, stage ordering, or workflow policy.

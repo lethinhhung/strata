@@ -1,79 +1,67 @@
 import * as utils from './utils.js';
-import * as helpers from './helpers.js';
-import { RunError } from './types.js';
 import { runChecks, setupChecks, workflowChecks } from './checks.js';
+import { repairGate } from './gateRepair.js';
+import { reviewWithRepairs } from './gateReview.js';
+import { createTests, runTestGate } from './gateTests.js';
+import { routeValidationRepair, validateStage } from './gateValidation.js';
 
 export async function runStageGates(repo: string, record: any, stage: any, config: any, file: string,
-  specContext: string, coordination: any, repairContext: string, implementation: any,
-  implementationAttempt: any, implementChanges: string[], sourceChanges: string[]) {
-  const beforeReview = utils.runSnapshot(repo, record, file);
-  record.progress.push({ type: 'agent', subtype: 'review', stage_id: stage.id, timestamp: utils.now() });
-  utils.save(record, file);
-  let review: any;
-  try { review = await utils.askReadOnly(config, 'Review Agent', {
-    repo,
-    text: `Review the production diff against the stage contract, specs, and repo rules. Do not edit files. The supplied diff and recorded phase paths are the authoritative changes for this stage; unrelated files in the worktree were not necessarily changed by this run and must not be reported as stage scope violations.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREVIEW FOCUS:\n${utils.json(coordination.review_focus ?? [])}\nSTAGE PATH AUDIT:\n${utils.json(stagePathAudit(stage))}\nDIFF:\n${helpers.reviewDiff(repo, sourceChanges, stage.checkpoint_commit)}`,
-  }, specContext, {}); } catch (error) {
-    record.progress.push({ type: 'gate', subtype: 'review', stage_id: stage.id, timestamp: utils.now(), passed: false });
-    utils.save(record, file);
-    throw error;
-  }
-  const reviewMutations = utils.changes(beforeReview, utils.runSnapshot(repo, record, file));
-  helpers.addPhase(stage, 'review', review, { observed_changed_paths: reviewMutations });
-  utils.save(record, file);
-  if (reviewMutations.length) throw new RunError(`Review Agent modified files: ${reviewMutations.join(', ')}`);
-  const reviewPassed = review.status === 'pass' && !(review.findings ?? []).some((item: any) => ['critical', 'major'].includes(String(item.severity).toLowerCase()));
-  record.progress.push({ type: 'gate', subtype: 'review', stage_id: stage.id, timestamp: utils.now(), passed: reviewPassed });
+  context: string, coordination: any, _repairContext: string, _implementation: any,
+  _implementationAttempt: any, _implementChanges: string[], sourceChanges: string[]) {
+  const sourcePaths = [...sourceChanges];
+  const reviewArgs = { repo, record, stage, config, file, context, coordination, sourceChanges: sourcePaths,
+    required: config.workflow.require_agent_gates, limit: config.workflow.review_repair_attempts ?? 3 };
+  const repair = async (role: 'implementation' | 'tests', findings: unknown, gate: string, task = '') => {
+    const result = await repairGate(repo, record, stage, config, file, context, role, gate, findings, task);
+    if (role === 'implementation') for (const target of result.changed) if (!sourcePaths.includes(target)) sourcePaths.push(target);
+    return result;
+  };
+  let review = await reviewWithRepairs({ ...reviewArgs, repair: (findings: unknown) => repair('implementation', findings, 'review') });
+  if (config.workflow.require_agent_gates && !review.passed) return failure(review, undefined, undefined, 'review');
   const setupEvidence = runChecks(repo, setupChecks(config.workflow), 'setup');
-  const beforeTest = utils.runSnapshot(repo, record, file);
-  record.progress.push({ type: 'agent', subtype: 'test', stage_id: stage.id, timestamp: utils.now() });
-  utils.save(record, file);
-  const tested = await utils.askScoped(config, 'Test Agent', {
-    repo, text: `Create deterministic tests; edit test files only. Strata ran the configured setup commands before this phase and runs configured checks after it. Review setup evidence first; if setup failed, report the exact blocker and do not claim test results. On repair attempts, use carried findings to fix test expectations or coverage only when they conflict with the contract; do not weaken tests to hide production defects.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nTASK:\n${coordination.test_task}\nSETUP EVIDENCE:\n${utils.json(setupEvidence)}\nREVIEW:\n${utils.json(review.findings ?? [])}\nCARRIED REPAIR FINDINGS:\n${repairContext}`,
-  }, specContext, { allowedPath: (target: string) => helpers.isTestPath(target) && helpers.inScope(target, stage.scope) });
-  const tester = tested.result;
-  const testChanges = utils.changes(beforeTest, utils.runSnapshot(repo, record, file));
-  const testViolations = testChanges.filter((target: string) => !helpers.isTestPath(target));
-  helpers.addPhase(stage, 'test', tester, { observed_changed_paths: testChanges, attempted_changed_paths: tested.attempted, discarded_changed_paths: tested.discarded, scope_violations: testViolations });
+  const initialTest = await createTests({ repo, record, stage, config, file, context, coordination, setupEvidence, review: review.review });
   const checks = workflowChecks(config.workflow);
-  const evidence = [...setupEvidence, ...runChecks(repo, checks)];
-  helpers.addPhase(stage, 'engine_checks', evidence);
-  const requiredTests = checks.filter((item: any) => item.kind === 'test' && !item.allow_unavailable);
-  const checksPassed = !testViolations.length && requiredTests.length > 0 && evidence.every((item: any) => item.gate_passed);
-  const testPassed = checksPassed && (!config.workflow.require_agent_gates || tester.status === 'pass');
-  record.progress.push({ type: 'gate', subtype: 'test', stage_id: stage.id, timestamp: utils.now(), passed: testPassed });
-  return validateStage(repo, record, stage, config, file, specContext, coordination, review, tester, evidence, reviewPassed, testPassed);
-}
-
-async function validateStage(repo: string, record: any, stage: any, config: any, file: string, context: string,
-  coordination: any, review: any, tester: any, evidence: any[], reviewPassed: boolean, testPassed: boolean) {
-  const before = utils.runSnapshot(repo, record, file);
-  record.progress.push({ type: 'agent', subtype: 'validate', stage_id: stage.id, timestamp: utils.now() });
-  utils.save(record, file);
-  let validation: any;
-  try { validation = await utils.askReadOnly(config, 'Validate Agent', {
-    repo, text: `Validate the contract, test evidence, checks, rules, and scope. Do not edit. Strata collected engine check evidence and applied each repository check's configured unavailable policy; treat gate_passed as authoritative for command checks. A missing required test check fails. A command that runs and exits nonzero fails, even if its unavailable policy allows missing executables. The recorded stage path audit is authoritative for changes made or attempted by this stage. Ignore unrelated dirty files and do not change files.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREQUIREMENTS:\n${utils.json(coordination.validation_requirements ?? [])}\nSTAGE PATH AUDIT:\n${utils.json(stagePathAudit(stage))}\nREVIEW:\n${utils.json(review)}\nTESTER:\n${utils.json(tester)}\nEVIDENCE:\n${utils.json(evidence)}`,
-  }, context, {}); } catch (error) {
-    record.progress.push({ type: 'gate', subtype: 'validation', stage_id: stage.id, timestamp: utils.now(), passed: false });
-    utils.save(record, file);
-    throw error;
+  const initialEvidence = [...setupEvidence, ...runChecks(repo, checks)];
+  let tests = await runTestGate({ repo, record, stage, config, file, context, coordination, tester: initialTest.result,
+    testViolations: initialTest.violations, initialEvidence, limit: config.workflow.test_repair_attempts ?? 3, repair,
+    reviewAfterSourceRepair: async () => {
+      review = await reviewWithRepairs({ ...reviewArgs, used: review.used, repair: (findings: unknown) => repair('implementation', findings, 'review') });
+    } });
+  if (!tests.passed) return failure(review, tests, undefined, 'test');
+  let validation = await validateStage({ repo, record, stage, config, file, context, coordination,
+    review: review.review, tester: tests.tester, evidence: tests.evidence });
+  let validationRepairs = 0;
+  while (config.workflow.require_agent_gates && !validation.passed && validationRepairs < (config.workflow.validation_repair_attempts ?? 2)) {
+    validationRepairs += 1;
+    const route = await routeValidationRepair({ repo, record, stage, config, file, context, tester: tests.tester, evidence: tests.evidence }, validation.validation);
+    const role = route.repair_role === 'tests' ? 'tests' : 'implementation';
+    const repaired = await repair(role, { validation: validation.validation, evidence: tests.evidence }, 'validation', route.repair_task ?? '');
+    if (role === 'implementation') {
+      review = await reviewWithRepairs({ ...reviewArgs, used: review.used, repair: (findings: unknown) => repair('implementation', findings, 'review') });
+      if (config.workflow.require_agent_gates && !review.passed) break;
+    } else {
+      tests = { ...tests, tester: repaired.result, passed: false };
+    }
+    tests = await runTestGate({ repo, record, stage, config, file, context, coordination, tester: tests.tester,
+      testViolations: [], limit: (config.workflow.test_repair_attempts ?? 3) - tests.used, used: tests.used, repair,
+      reviewAfterSourceRepair: async () => {
+        review = await reviewWithRepairs({ ...reviewArgs, used: review.used, repair: (findings: unknown) => repair('implementation', findings, 'review') });
+      } });
+    if (!tests.passed) break;
+    validation = await validateStage({ repo, record, stage, config, file, context, coordination,
+      review: review.review, tester: tests.tester, evidence: tests.evidence });
   }
-  const mutations = utils.changes(before, utils.runSnapshot(repo, record, file));
-  helpers.addPhase(stage, 'validate', validation, { observed_changed_paths: mutations });
-  utils.save(record, file);
-  if (mutations.length) throw new RunError(`Validate Agent modified files: ${mutations.join(', ')}`);
-  const validationPassed = validation.status === 'pass';
-  record.progress.push({ type: 'gate', subtype: 'validation', stage_id: stage.id, timestamp: utils.now(), passed: validationPassed });
-  const passed = testPassed && (!config.workflow.require_agent_gates || (reviewPassed && validationPassed));
-  return { passed, reason: passed ? '' : 'A required stage gate failed or required test evidence is unavailable', findings: { implementation: [], review: review.findings ?? [], test: tester.findings ?? [], validation: validation.findings ?? [], evidence } };
+  const passed = tests.passed && (!config.workflow.require_agent_gates || (review.passed && validation.passed));
+  if (passed) return { passed: true, reason: '', findings: {} };
+  const failedGate = !review.passed && config.workflow.require_agent_gates ? 'review'
+    : !tests.passed ? 'test' : 'validation';
+  return failure(review, tests, validation, failedGate);
 }
 
-function stagePathAudit(stage: any) {
-  return (stage.phase_results ?? []).map((phase: any) => ({
-    phase: phase.phase,
-    observed_changed_paths: phase.observed_changed_paths ?? [],
-    attempted_changed_paths: phase.attempted_changed_paths ?? [],
-    discarded_changed_paths: phase.discarded_changed_paths ?? [],
-    scope_violations: phase.scope_violations ?? [],
-  }));
+function failure(review: any, tests: any, validation: any, gate: string) {
+  const findings = { failed_gate: gate, review: review.review.findings ?? [], test: tests?.tester.findings ?? [],
+    validation: validation?.validation.findings ?? [], evidence: tests?.evidence ?? [] };
+  const blockedChecks = (tests?.evidence ?? []).filter((item: any) => !item.gate_passed).map((item: any) => item.id);
+  const detail = gate === 'test' && blockedChecks.length ? `; failed checks: ${blockedChecks.join(', ')}` : '';
+  return { passed: false, repair_exhausted: true, reason: `Repair budget exhausted for ${gate} gate${detail}`, findings };
 }

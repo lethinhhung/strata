@@ -14,7 +14,7 @@ const defaultRecord: Partial<RunRecord> = {
      epic: '',
      epic_path: '',
      epic_absolute_path: '',
-     config: { worker:{}, strong:{}, workflow:{ max_repairs:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', test_commands:[], quality_checks:[], }, path:undefined },
+     config: { worker:{}, strong:{}, workflow:{ max_repairs:0, review_repair_attempts:0, test_repair_attempts:0, validation_repair_attempts:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', memory_policy:'', test_commands:[], quality_checks:[], setup_commands:[], require_agent_gates:true }, path:undefined },
      memory_consulted: { paths:[], excerpt:'' },
      plan: undefined,
      updated_at: undefined,
@@ -34,7 +34,7 @@ const defaultRecord: Partial<RunRecord> = {
   // Now record is guaranteed to have all fields of RunRecord
   let repairContext = initialFinding;
   for (let attemptIndex = 0; attemptIndex <= config.workflow.max_repairs; attemptIndex += 1) {
-    let result;
+    let result: any;
     try {
       result = await runStage(repo, record, stage, config, file, {
         repairContext,
@@ -56,6 +56,7 @@ const defaultRecord: Partial<RunRecord> = {
       utils.save(record, file);
       return;
     }
+    if (result.repair_exhausted) break;
     if (attemptIndex < config.workflow.max_repairs) {
       record.events.push({ type: 'repair', stage_id: stage.id, attempt: attemptIndex + 1, details: result.findings, at: utils.now() });
       repairContext = utils.json(result.findings);

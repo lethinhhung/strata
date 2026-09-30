@@ -1,5 +1,8 @@
 export interface Workflow {
   max_repairs: number;
+  review_repair_attempts: number;
+  test_repair_attempts: number;
+  validation_repair_attempts: number;
   checkpoint: boolean;
   checkpoint_prefix: string;
   spec_paths: string[];
@@ -25,6 +28,9 @@ export function loadWorkflow(raw: Partial<Workflow> = {}): Workflow {
   const quality = commandList(raw.quality_checks);
   const workflow: Workflow = {
     max_repairs: typeof raw.max_repairs === 'number' ? raw.max_repairs : 2,
+    review_repair_attempts: typeof raw.review_repair_attempts === 'number' ? raw.review_repair_attempts : 3,
+    test_repair_attempts: typeof raw.test_repair_attempts === 'number' ? raw.test_repair_attempts : 3,
+    validation_repair_attempts: typeof raw.validation_repair_attempts === 'number' ? raw.validation_repair_attempts : 2,
     checkpoint: typeof raw.checkpoint === 'boolean' ? raw.checkpoint : true,
     checkpoint_prefix: typeof raw.checkpoint_prefix === 'string' ? raw.checkpoint_prefix : 'strata',
     spec_paths: Array.isArray(raw.spec_paths) ? raw.spec_paths.filter((item): item is string => typeof item === 'string') : ['specs'],
@@ -37,6 +43,9 @@ export function loadWorkflow(raw: Partial<Workflow> = {}): Workflow {
     checks: configuredChecks(raw.checks, tests, quality),
   };
   if (!Number.isInteger(workflow.max_repairs) || workflow.max_repairs < 0) throw new Error('workflow.max_repairs must be a non-negative integer');
+  for (const key of ['review_repair_attempts', 'test_repair_attempts', 'validation_repair_attempts'] as const) {
+    if (!Number.isInteger(workflow[key]) || workflow[key] < 0) throw new Error(`workflow.${key} must be a non-negative integer`);
+  }
   if (!workflow.checkpoint) throw new Error('workflow.checkpoint must be true; stage and epic checkpoints are required by specs/core.md');
   return workflow;
 }
