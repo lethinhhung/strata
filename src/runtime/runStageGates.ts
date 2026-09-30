@@ -12,7 +12,7 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
   let review: any;
   try { review = await utils.askReadOnly(config, 'Review Agent', {
     repo,
-    text: `Review the production diff against the stage contract, specs, and repo rules. Do not edit files.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREVIEW FOCUS:\n${utils.json(coordination.review_focus ?? [])}\nDIFF:\n${helpers.reviewDiff(repo, sourceChanges, stage.checkpoint_commit)}`,
+    text: `Review the production diff against the stage contract, specs, and repo rules. Do not edit files. The supplied diff and recorded phase paths are the authoritative changes for this stage; unrelated files in the worktree were not necessarily changed by this run and must not be reported as stage scope violations.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREVIEW FOCUS:\n${utils.json(coordination.review_focus ?? [])}\nSTAGE PATH AUDIT:\n${utils.json(stagePathAudit(stage))}\nDIFF:\n${helpers.reviewDiff(repo, sourceChanges, stage.checkpoint_commit)}`,
   }, specContext, {}); } catch (error) {
     record.progress.push({ type: 'gate', subtype: 'review', stage_id: stage.id, timestamp: utils.now(), passed: false });
     utils.save(record, file);
@@ -48,7 +48,7 @@ async function validateStage(repo: string, record: any, stage: any, config: any,
   utils.save(record, file);
   let validation: any;
   try { validation = await utils.askReadOnly(config, 'Validate Agent', {
-    repo, text: `Validate the contract, test evidence, checks, rules, and scope. Missing checks fail; do not edit. Strata collected the supplied engine evidence in the target repository; treat it as authoritative. The target repository and its Git metadata are available, but do not change files.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREQUIREMENTS:\n${utils.json(coordination.validation_requirements ?? [])}\nREVIEW:\n${utils.json(review)}\nTESTER:\n${utils.json(tester)}\nEVIDENCE:\n${utils.json(evidence)}`,
+    repo, text: `Validate the contract, test evidence, checks, rules, and scope. Missing checks fail; do not edit. Strata collected the supplied engine evidence in the target repository; treat it as authoritative. The recorded stage path audit is the authoritative list of changes made or attempted by this stage. Do not treat unrelated files currently dirty in the worktree as stage changes or scope violations. Strata enforces agent write boundaries and reports discarded out-of-scope writes in the audit. The target repository and its Git metadata are available, but do not change files.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREQUIREMENTS:\n${utils.json(coordination.validation_requirements ?? [])}\nSTAGE PATH AUDIT:\n${utils.json(stagePathAudit(stage))}\nREVIEW:\n${utils.json(review)}\nTESTER:\n${utils.json(tester)}\nEVIDENCE:\n${utils.json(evidence)}`,
   }, context, {}); } catch (error) {
     record.progress.push({ type: 'gate', subtype: 'validation', stage_id: stage.id, timestamp: utils.now(), passed: false });
     utils.save(record, file);
@@ -62,4 +62,14 @@ async function validateStage(repo: string, record: any, stage: any, config: any,
   record.progress.push({ type: 'gate', subtype: 'validation', stage_id: stage.id, timestamp: utils.now(), passed: validationPassed });
   const passed = reviewPassed && testPassed && validationPassed;
   return { passed, reason: passed ? '' : 'A required stage gate failed or required test evidence is unavailable', findings: { implementation: [], review: review.findings ?? [], test: tester.findings ?? [], validation: validation.findings ?? [], evidence } };
+}
+
+function stagePathAudit(stage: any) {
+  return (stage.phase_results ?? []).map((phase: any) => ({
+    phase: phase.phase,
+    observed_changed_paths: phase.observed_changed_paths ?? [],
+    attempted_changed_paths: phase.attempted_changed_paths ?? [],
+    discarded_changed_paths: phase.discarded_changed_paths ?? [],
+    scope_violations: phase.scope_violations ?? [],
+  }));
 }
