@@ -48,7 +48,7 @@ async function validateStage(repo: string, record: any, stage: any, config: any,
   utils.save(record, file);
   let validation: any;
   try { validation = await utils.askReadOnly(config, 'Validate Agent', {
-    repo, text: `Validate the contract, test evidence, checks, rules, and scope. Missing checks fail; do not edit. Strata collected the supplied engine evidence in the real repository; treat it as authoritative. This read-only workspace intentionally has no Git metadata, so do not rerun Git-dependent tests or fail because Git is unavailable.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREQUIREMENTS:\n${utils.json(coordination.validation_requirements ?? [])}\nREVIEW:\n${utils.json(review)}\nTESTER:\n${utils.json(tester)}\nEVIDENCE:\n${utils.json(evidence)}`,
+    repo, text: `Validate the contract, test evidence, checks, rules, and scope. Missing checks fail; do not edit. Strata collected the supplied engine evidence in the target repository; treat it as authoritative. The target repository and its Git metadata are available, but do not change files.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREQUIREMENTS:\n${utils.json(coordination.validation_requirements ?? [])}\nREVIEW:\n${utils.json(review)}\nTESTER:\n${utils.json(tester)}\nEVIDENCE:\n${utils.json(evidence)}`,
   }, context, {}); } catch (error) {
     record.progress.push({ type: 'gate', subtype: 'validation', stage_id: stage.id, timestamp: utils.now(), passed: false });
     utils.save(record, file);
