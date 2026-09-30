@@ -2,6 +2,7 @@ import * as utils from './utils.js';
 import * as helpers from './helpers.js';
 import { RunError } from './types.js';
 import { runStageGates } from './runStageGates.js';
+import { implementationCanProceed } from './implementationResult.js';
 
 export async function runStage(repo: string, record: any, stage: any, config: any, file: string, { repairContext = '', repairRole = 'Implement Agent' } = {}) {
   stage.status = 'in_progress';
@@ -67,7 +68,7 @@ const retainedSourceChanges = [...Array.from(utils.runSnapshot(repo, record, fil
   const implementationViolations = implementationAttempt.discarded;
   utils.save(record, file);
   if (implementationViolations.length) throw new RunError(`Implementer attempted files outside its scope: ${implementationViolations.join(', ')}`);
-  if (implementation.status !== 'pass' || (!repairIsTestOnly && !effectiveImplementChanges.length)) {
+  if (!implementationCanProceed(implementation.status, repairIsTestOnly, effectiveImplementChanges)) {
     const discarded = implementationAttempt.discarded.length
       ? `; discarded out-of-role writes: ${implementationAttempt.discarded.join(', ')}` : '';
     return { passed: false, reason: `Implementation failed or produced no in-scope source changes${discarded}`, findings: implementation.findings ?? [] };

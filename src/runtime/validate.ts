@@ -1,4 +1,5 @@
 import { RunError } from './types.js';
+import { isTestPath } from './isTestPath.js';
 
 export function validatePlan(plan: any) {
   if (!Array.isArray(plan.stages) || !plan.stages.length) throw new RunError('Epic Coordinator must return a non-empty stages array');
@@ -14,6 +15,9 @@ export function validatePlan(plan: any) {
     }
     if (!Array.isArray(stage.scope) || !stage.scope.length || stage.scope.some((part: string) => typeof part !== 'string')) {
       throw new RunError(`Stage ${stage.id} scope must be a non-empty array of repository paths or patterns`);
+    }
+    if (stage.scope.every((part: string) => isTestPath(part))) {
+      throw new RunError(`Stage ${stage.id} must include production source paths; add its tests to the same stage`);
     }
     if (typeof stage.checkpoint !== 'string' || !stage.checkpoint || checkpoints.has(stage.checkpoint)) {
       throw new RunError(`Stage ${stage.id} has a missing or duplicate checkpoint identity`);
