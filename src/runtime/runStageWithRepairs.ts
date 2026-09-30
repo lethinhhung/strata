@@ -1,5 +1,4 @@
 import * as utils from './utils.js';
-import * as helpers from './helpers.js';
 import { runStage } from './runStage.js';
 import { RunError, RunRecord } from './types.js';
 import { checkpoint } from './checkpoint.js';
@@ -39,7 +38,6 @@ const defaultRecord: Partial<RunRecord> = {
     try {
       result = await runStage(repo, record, stage, config, file, {
         repairContext,
-        repairRole: repairIsTestOnly(repairContext) ? 'Test Agent' : 'Implement Agent',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -69,44 +67,4 @@ const defaultRecord: Partial<RunRecord> = {
   record.progress.push({ type: 'stage', subtype: 'fail', stage_id: stage.id, timestamp: utils.now() });
   utils.save(record, file);
   throw new RunError(`Stage ${stage.id} halted: ${stage.failure}`);
-}
-
-export function repairIsTestOnly(context: unknown) {
-  let findings: any = context;
-  if (typeof context === 'string') {
-    try { findings = JSON.parse(context); } catch { findings = context; }
-  }
-  if (findings && typeof findings === 'object' && !Array.isArray(findings)) {
-    const implementationIssues = (findings.implementation ?? []).filter(isSubstantiveSourceFinding);
-    const sourceIssues = [...implementationIssues, ...(findings.source ?? [])];
-    if (sourceIssues.length) return false;
-    const testGateFailed = (findings.evidence ?? []).some((item: any) => item.kind === 'test' && !item.passed);
-    const testAgentReportedFailure = (findings.test ?? []).some(isTestFinding);
-    if (testGateFailed || testAgentReportedFailure) return true;
-    const productionReviews = (findings.review ?? []).filter((item: any) => !isTestFinding(item));
-    if (productionReviews.length) return false;
-    const reviewIssues = findings.final_review?.findings ?? findings.final_review ?? [];
-    const validationIssues = findings.validation?.findings ?? findings.validation ?? [];
-    const testIssues = [...(findings.test ?? []), ...(Array.isArray(reviewIssues) ? reviewIssues : []), ...(Array.isArray(validationIssues) ? validationIssues : [])];
-    const failedTestEvidence = (findings.evidence ?? []).some((item: any) => ['test', 'final_test'].includes(item.kind) && !item.passed);
-    const hasValidationFailure = Boolean(findings.validation && (Array.isArray(findings.validation) ? findings.validation.length : findings.validation.status === 'fail' || validationIssues.length));
-    const issuesAreTestOnly = testIssues.length > 0 && testIssues.every(isTestFinding);
-    return (issuesAreTestOnly || failedTestEvidence) && (!hasValidationFailure || validationIssues.length > 0 && validationIssues.every(isTestFinding));
-  }
-  return /missing test coverage|test assertion|test expectation|tests? (?:are )?failing/i.test(String(findings));
-}
-
-function isTestFinding(item: any) {
-  const file = item && typeof item === 'object' ? item.path ?? item.file ?? '' : '';
-  const detail = `${file} ${item?.message ?? item?.description ?? item ?? ''}`;
-  return helpers.isTestPath(file) || /missing test coverage|test assertion|test expectation|tests? (?:are )?failing|(?:failed|failing|failure).{0,80}(?:tests?|suites?|jest)|(?:tests?|suites?|jest).{0,80}(?:failed|failing|failure)|jest.{0,80}(?:error|fail|missing)/i.test(detail);
-}
-
-function isSubstantiveSourceFinding(item: any) {
-  if (!item || typeof item !== 'object') return false;
-  const severity = String(item.severity ?? '').toLowerCase();
-  if (!['critical', 'major', 'high', 'error', 'blocking'].includes(severity)) return false;
-  const paths = [item.path, item.file, ...(Array.isArray(item.affected_paths) ? item.affected_paths : [])]
-    .filter((file): file is string => typeof file === 'string' && file.length > 0);
-  return paths.some((file) => !helpers.isTestPath(file));
 }

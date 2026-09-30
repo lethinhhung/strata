@@ -1,3 +1,3 @@
-export function implementationCanProceed(status: string, testOnly: boolean, changes: string[]) {
-  return testOnly ? status === 'pass' : changes.length > 0;
+export function implementationCanProceed(status: string, testOnly: boolean, changes: string[], allowNoChanges = false) {
+  return testOnly ? status === 'pass' : allowNoChanges || changes.length > 0;
 }

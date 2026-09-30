@@ -20,4 +20,4 @@ spec_paths = ["specs", "RULES.md", "TYPESCRIPT_REFACTOR_EPIC.md"]
 memory_path = "memory"
 memory_policy = ""
 quality_checks = [["npm", "run", "typecheck"]]
-test_commands = [["npm", "install"], ["npm", "test"]]
+test_commands = [["npm", "ci"], ["npm", "test"]]

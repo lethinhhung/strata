@@ -3,10 +3,15 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import test from 'node:test';
 
-test('tracked text files stay below 120 lines', () => {
+const lineLimitExemptions = new Set([
+  'bun.lock', 'bun.lockb', 'npm-shrinkwrap.json', 'package-lock.json',
+  'pnpm-lock.yaml', 'yarn.lock',
+]);
+
+test('tracked maintained text files stay below 120 lines', () => {
   const files = execFileSync('git', ['ls-files', '--cached', '-z'], { encoding: 'utf8' })
     .split('\0').filter(Boolean);
-  const oversized = files.filter((file) => {
+  const oversized = files.filter((file) => !lineLimitExemptions.has(file.split('/').at(-1) ?? '')).filter((file) => {
     const buffer = fs.readFileSync(file);
     if (buffer.includes(0)) return false;
     const text = buffer.toString('utf8');
