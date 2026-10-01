@@ -32,6 +32,7 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
     : await createTests({ repo, record, stage, config, file, context, coordination, setupEvidence, review: review.review });
   setupEvidence = runChecks(repo, setup, 'setup');
   evidence = [...setupEvidence, ...runChecks(repo, checks)];
+  recordCheckGate(record, stage, file, evidence);
 
   while (true) {
     const validation = coordination.run_validation === false
@@ -79,10 +80,17 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
 
     setupEvidence = runChecks(repo, setup, 'setup');
     evidence = [...setupEvidence, ...runChecks(repo, checks)];
+    recordCheckGate(record, stage, file, evidence);
     review = coordination.run_review === false
       ? { review: { status: 'skipped', findings: [] }, passed: true }
       : await reviewStage(reviewArgs);
   }
+}
+
+function recordCheckGate(record: any, stage: any, file: string, evidence: any[]) {
+  const passed = evidence.every((item: any) => item.gate_passed);
+  record.progress.push({ type: 'gate', subtype: 'test', stage_id: stage.id, timestamp: utils.now(), passed });
+  utils.save(record, file);
 }
 
 async function coordinateGate(repo: string, record: any, stage: any, config: any, file: string,
@@ -91,13 +99,13 @@ async function coordinateGate(repo: string, record: any, stage: any, config: any
     const result = await agentStep(record, file, 'stage_coordinator', stage.id, () => utils.askReadOnly(config, 'Stage Coordinator', {
     repo,
     shape: '{"decision":"ready|repair|blocked","repair_role":"project-defined agent role","repair_task":"...","rationale":"..."}',
-    text: `Decide the next action for this stage using the project-defined policy. Specialist reports are opinions; interpret them against project rules and the stage contract. Configured command evidence is authoritative: if any command has gate_passed=false, do not choose ready; route a concrete repair to the project-defined role best able to fix the cause. Choose ready when the contract is met and configured commands pass, even if a specialist report disagrees and you judge its concern inapplicable. Choose blocked only when you identify a concrete external or policy blocker that another agent action cannot repair. Do not edit files.
+    text: `Decide the next action for this stage using the project-defined policy. Specialist reports are opinions; interpret them against project rules and the stage contract. Configured command evidence is authoritative: if any command has gate_passed=false, do not choose ready; route a concrete repair to the project-defined role best able to fix the cause. Choose ready when the contract is met and configured commands pass, even if a specialist report disagrees and you judge its concern inapplicable. Choose blocked only when you identify a concrete external or policy blocker that another agent action cannot repair. Do not edit files. Summarize check output to the actionable lines; the complete evidence is stored in the run record.
 CONTRACT:
 ${utils.json(helpers.stageContract(stage))}
 STAGE PLAN:
 ${utils.json(reports.coordination)}
 LATEST REPORTS AND CHECK EVIDENCE:
-${utils.json(reports)}
+${utils.json(compactReports(reports))}
 STAGE PATH AUDIT:
 ${utils.json(stage.phase_results.map((phase: any) => ({ phase: phase.phase, observed_changed_paths: phase.observed_changed_paths ?? [], attempted_changed_paths: phase.attempted_changed_paths ?? [], discarded_changed_paths: phase.discarded_changed_paths ?? [] })))}`,
     }, utils.phaseContext(repo, config), { strong: true }));
@@ -105,6 +113,27 @@ ${utils.json(stage.phase_results.map((phase: any) => ({ phase: phase.phase, obse
   } catch (error) {
     return { decision: 'blocked', rationale: `Could not obtain a Stage Coordinator decision: ${String(error)}` };
   }
+}
+
+function compactReports(reports: any) {
+  const summarize = (value: any) => JSON.stringify(value ?? {}).slice(0, 6000);
+  const evidence = (reports.evidence ?? []).map((item: any) => ({
+    id: item.id, kind: item.kind, command: item.command, exit_code: item.exit_code,
+    gate_passed: item.gate_passed, error: item.error,
+    output: `${item.stdout ?? ''}\n${item.stderr ?? ''}`.slice(-2400),
+  }));
+  return {
+    coordination: reports.coordination,
+    review: summarize(reports.review),
+    tester: summarize(reports.tester),
+    test_scope_violations: reports.test_scope_violations,
+    validation: summarize(reports.validation),
+    evidence,
+    repairHistory: (reports.repairHistory ?? []).slice(-5).map((item: any) => ({
+      phase: item.phase, result: summarize(item.result),
+      observed_changed_paths: item.observed_changed_paths,
+    })),
+  };
 }
 
 function normalizeDecision(result: any) {
