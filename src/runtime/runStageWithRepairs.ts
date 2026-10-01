@@ -33,7 +33,10 @@ const defaultRecord: Partial<RunRecord> = {
    });
   // Now record is guaranteed to have all fields of RunRecord
   let repairContext = initialFinding;
-  for (let attemptIndex = 0; attemptIndex <= config.workflow.max_repairs; attemptIndex += 1) {
+  let attemptIndex = 0;
+  let previousFailure = '';
+  while (true) {
+    attemptIndex += 1;
     let result: any;
     try {
       result = await runStage(repo, record, stage, config, file, {
@@ -41,27 +44,33 @@ const defaultRecord: Partial<RunRecord> = {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      result = { passed: false, reason: message, findings: [message] };
+      result = { passed: false, blocked: true, reason: message, findings: [message] };
     }
     const attempt = {
-      stage_id: stage.id, number: attemptIndex + 1, passed: result.passed,
+      stage_id: stage.id, number: attemptIndex, passed: result.passed,
       reason: result.reason, findings: result.findings, at: utils.now(),
     };
     record.attempts.push(attempt);
     utils.save(record, file);
     if (result.passed) {
-      checkpoint(repo, stage, config, record, file, attemptIndex + 1);
+      checkpoint(repo, stage, config, record, file, attemptIndex);
       record.progress.push({ type: 'stage', subtype: 'complete', stage_id: stage.id, timestamp: utils.now() });
       if (config.workflow.checkpoint) record.progress.push({ type: 'gate', subtype: 'checkpoint', stage_id: stage.id, timestamp: utils.now(), passed: true });
       utils.save(record, file);
       return;
     }
-    if (result.repair_exhausted) break;
-    if (attemptIndex < config.workflow.max_repairs) {
-      record.events.push({ type: 'repair', stage_id: stage.id, attempt: attemptIndex + 1, details: result.findings, at: utils.now() });
-      repairContext = utils.json(result.findings);
-      utils.save(record, file);
-    }
+    if (result.blocked) break;
+    const signature = utils.json({ reason: result.reason, findings: result.findings });
+    record.events.push({ type: 'repair', stage_id: stage.id, attempt: attemptIndex, details: result.findings, at: utils.now() });
+    repairContext = utils.json({
+      previous_attempt: result.findings,
+      repeated_failure: signature === previousFailure,
+      instruction: signature === previousFailure
+        ? 'The same failure repeated. Diagnose why the previous approach made no progress and choose a different repair or report a concrete blocker.'
+        : 'Continue repairing the stage based on the latest evidence.',
+    });
+    previousFailure = signature;
+    utils.save(record, file);
   }
   stage.status = 'failed';
   stage.failure = record.attempts.slice(-1)[0]?.reason;

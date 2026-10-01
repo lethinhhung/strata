@@ -12,7 +12,7 @@ Keep entries concise and check for duplicates before writing. No update is requi
 
 ## Precedence and Access
 - Specifications are authoritative. Active decisions are precedent but yield to conflicting specifications. Notes and progress are informational and cannot resolve specification conflicts.
-- The Epic Coordinator reads the configured memory policy and relevant entries before planning.
+- The Coordinator reads the configured memory policy and relevant entries before planning.
 - The Stage Coordinator selects relevant entries and passes them to agents as read-only context, recording the handoff in the run record. Agents use relevant entries to guide investigation, planning, and implementation, and to avoid repeating known discoveries. Worker agents may read supplied entries but never write memory.
 - The Archivist reads the completed run and existing entries. It is the only role authorized to write memory, and only after a successful run.
 - Memory is advisory context: it may guide work but cannot override specifications or acceptance criteria, and it is never implementation, review, test, validation, or acceptance evidence. Missing or unavailable memory does not block a run.

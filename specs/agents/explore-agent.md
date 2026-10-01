@@ -1,5 +1,7 @@
 # Explore Agent
 
+This is a default agent role. A target project may define a different role or override this definition.
+
 ## Purpose
 Gather repository context needed to plan a bounded stage task.
 

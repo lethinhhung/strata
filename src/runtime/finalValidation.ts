@@ -44,17 +44,14 @@ const defaultRecord: Partial<RunRecord> = {
   const validator = await agentStep(record, file, 'validate', 'epic', () => utils.askReadOnly(config, 'Validate Agent', {
     repo,
     shape: '{"status":"pass|fail","findings":[],"gates":[{"name":"...","passed":true,"evidence":"..."}]}',
-    text: `Read-only final validation of epic criteria, stage results, review findings, configured repository checks, rules, and plan integrity. Strata has already applied each check's unavailable policy; use gate_passed as authoritative. A command that runs and exits nonzero fails even when its unavailable policy allows a missing executable. A required test check must be configured. Do not edit files. Stage path audits are authoritative for stage changes; ignore unrelated dirty files.\nEPIC:\n${record.epic}\nSTAGES:\n${utils.json(record.stages)}\nEPIC REVIEW:\n${utils.json(review)}\nENGINE EVIDENCE:\n${utils.json(evidence)}`,
+    text: `Read-only final validation of epic criteria, stage results, review findings, configured repository checks, rules, and plan integrity. Treat this as a specialist report for the Coordinator. Engine gate_passed values are authoritative for configured commands; no test command is required when the project has none. Do not edit files. Stage path audits are authoritative for stage changes; ignore unrelated dirty files.\nEPIC:\n${record.epic}\nSTAGES:\n${utils.json(record.stages)}\nEPIC REVIEW:\n${utils.json(review)}\nENGINE EVIDENCE:\n${utils.json(evidence)}`,
   }, context, {}));
   const validatorMutations = utils.changes(beforeValidator, utils.runSnapshot(repo, record, file));
   record.final_review = review;
   record.final_validation = { result: validator, observed_changed_paths: validatorMutations };
   record.final_evidence = evidence;
   record.final_validated_at = utils.now();
-  const agentGatesPassed = !config.workflow.require_agent_gates ||
-    (review.status === 'pass' && !(review.findings ?? []).length && validator.status === 'pass');
-  const passed = agentGatesPassed && !validatorMutations.length &&
-    checks.some((item: any) => item.kind === 'test' && !item.allow_unavailable) && evidence.every((item: any) => item.gate_passed);
+  const passed = review.status === 'pass' && !validatorMutations.length && evidence.every((item: any) => item.gate_passed);
   record.progress.push({ type: 'gate', subtype: 'validation', stage_id: 'epic', timestamp: utils.now(), passed });
   utils.save(record, file);
   return { passed, review, validation: validator, evidence };

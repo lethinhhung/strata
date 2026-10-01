@@ -5,12 +5,15 @@ import * as fs from 'node:fs';
 import { executeRun } from './executeRun.js';
 import { agentStep } from './agentStep.js';
 
-export async function startRun(repo: string, epicPath: string, config: any, onProgress?: (entry: any) => void) {
-  const absoluteEpic = path.resolve(repo, epicPath);
-  if (!fs.existsSync(absoluteEpic) || !fs.statSync(absoluteEpic).isFile()) throw new RunError(`Epic file not found: ${absoluteEpic}`);
+export async function startRun(repo: string, epicPath: string, config: any, onProgress?: (entry: any) => void, inlinePrompt?: string) {
+  const isInline = typeof inlinePrompt === 'string';
+  const absoluteEpic = isInline ? '' : path.resolve(repo, epicPath);
+  if (isInline && !inlinePrompt.trim()) throw new RunError('Inline epic prompt must not be empty');
+  if (!isInline && (!fs.existsSync(absoluteEpic) || !fs.statSync(absoluteEpic).isFile())) throw new RunError(`Epic file not found: ${absoluteEpic}`);
   if (utils.git(repo, ['rev-parse', '--is-inside-work-tree']).stdout.trim() !== 'true') throw new RunError('Target directory must be a Git worktree');
-  if (utils.snapshot(repo, [config.path, absoluteEpic]).size) throw new RunError('Start from a clean Git worktree apart from the Strata config and selected epic');
-  const epic = fs.readFileSync(absoluteEpic, 'utf8');
+  const allowedPaths = [config.path, ...(absoluteEpic ? [absoluteEpic] : [])];
+  if (utils.snapshot(repo, allowedPaths).size) throw new RunError('Start from a clean Git worktree apart from the Strata config and selected epic');
+  const epic = isInline ? inlinePrompt! : fs.readFileSync(absoluteEpic, 'utf8');
   const memoryPaths = [config.workflow.memory_path, config.workflow.memory_policy].filter(Boolean);
   const memory = utils.readTree(repo, memoryPaths, 12_000);
   const specs = utils.phaseContext(repo, config);
@@ -23,7 +26,7 @@ const record: RunRecord = {
        created_at: utils.now(),
        repository: repo,
        epic,
-       epic_path: path.relative(repo, absoluteEpic),
+       epic_path: isInline ? '(inline prompt)' : path.relative(repo, absoluteEpic),
        epic_absolute_path: absoluteEpic,
        config: config.path,
        memory_consulted: { paths: memoryPaths, excerpt: memory },

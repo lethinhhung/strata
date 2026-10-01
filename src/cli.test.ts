@@ -9,6 +9,12 @@ test('CLI separates positional arguments from options', () => {
   });
 });
 
+test('CLI accepts an inline epic prompt', () => {
+  assert.deepEqual(args(['run', '--prompt', 'Add a settings screen', '--repo', '/tmp/repo']), {
+    positional: ['run'], options: { prompt: 'Add a settings screen', repo: '/tmp/repo' },
+  });
+});
+
 test('progress output describes run, stage, agent, and gate transitions', () => {
   const timestamp = '2026-09-29T00:00:00.000Z';
   assert.match(formatProgress({ type: 'run', subtype: 'resume', timestamp }), /run: resume/);

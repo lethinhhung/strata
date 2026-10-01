@@ -5,7 +5,7 @@ export function formatProgress(entry: ProgressEntry): string {
    if (entry.type === 'run') return `[${time}] run: ${entry.subtype}`;
    if (entry.type === 'stage') return `[${time}] stage ${entry.stage_id}: ${entry.subtype}`;
    if (entry.type === 'agent') {
-      let msg = `[${time}] agent ${entry.subtype} (stage ${entry.stage_id})`;
+      let msg = `[${time}] agent ${entry.role ?? entry.subtype} (stage ${entry.stage_id})`;
       if (entry.duration_ms !== undefined) {
          const seconds = (entry.duration_ms / 1000).toFixed(1);
          msg += ` — ${seconds}s`;
