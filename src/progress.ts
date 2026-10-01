@@ -20,6 +20,79 @@ export function printProgress(entry: ProgressEntry): void {
   console.log(formatProgress(entry));
 }
 
+type ProgressReporter = {
+  print: (entry: ProgressEntry) => void;
+  finish: () => void;
+};
+
+/** Print normal progress events while keeping a live elapsed-time line in a TTY. */
+export function createProgressReporter(isTTY = process.stdout.isTTY): ProgressReporter {
+  let runStartedAt: number | undefined;
+  let stageStartedAt: number | undefined;
+  let stageId: string | undefined;
+  let interval: ReturnType<typeof setInterval> | undefined;
+  let tickerVisible = false;
+
+  const clearTicker = () => {
+    if (!tickerVisible) return;
+    process.stdout.write('\r\x1b[2K');
+    tickerVisible = false;
+  };
+
+  const renderTicker = () => {
+    if (!isTTY || runStartedAt === undefined) return;
+    const now = Date.now();
+    const runTime = formatElapsed(now - runStartedAt);
+    const stageTime = stageStartedAt === undefined ? undefined : formatElapsed(now - stageStartedAt);
+    const stage = stageId && stageTime ? `Stage ${stageId} ${stageTime} | ` : '';
+    process.stdout.write(`\r\x1b[2K⏱ ${stage}Total ${runTime}`);
+    tickerVisible = true;
+  };
+
+  return {
+    print(entry) {
+      if (entry.type === 'run' && (entry.subtype === 'start' || entry.subtype === 'resume')) {
+        runStartedAt = Date.parse(entry.timestamp);
+        if (!Number.isFinite(runStartedAt)) runStartedAt = Date.now();
+      }
+      if (entry.type === 'stage') {
+        if (entry.subtype === 'in_progress') {
+          stageId = entry.stage_id;
+          stageStartedAt = Date.parse(entry.timestamp);
+          if (!Number.isFinite(stageStartedAt)) stageStartedAt = Date.now();
+        } else if (entry.subtype === 'complete' || entry.subtype === 'fail' || entry.subtype === 'skip') {
+          stageId = undefined;
+          stageStartedAt = undefined;
+        }
+      }
+
+      clearTicker();
+      if (isTTY) process.stdout.write(`${formatProgress(entry)}\n`);
+      else console.log(formatProgress(entry));
+
+      if (isTTY && (entry.type === 'run' || entry.type === 'stage')) {
+        if (!interval && runStartedAt !== undefined) interval = setInterval(renderTicker, 1000);
+        renderTicker();
+      }
+    },
+    finish() {
+      if (interval) clearInterval(interval);
+      interval = undefined;
+      clearTicker();
+    },
+  };
+}
+
+function formatElapsed(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const mm = String(minutes).padStart(2, '0');
+  const ss = String(seconds).padStart(2, '0');
+  return hours ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
 export function formatOutcome(action: 'run' | 'resume', record: { run_id: string; status: string }, reference: string) {
   return `${action} ${record.run_id}: ${record.status} — ${reference}`;
 }
