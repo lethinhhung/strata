@@ -3,6 +3,7 @@ import * as utils from './utils.js';
 import { runStageWithRepairs } from './runStageWithRepairs.js';
 import { finalValidation } from './finalValidation.js';
 import { archiveMemory } from './archiveMemory.js';
+import { agentStep } from './agentStep.js';
 
 export async function executeRun(repo: string, record: any, config: any, file: string) {
   // Ensure record has all required fields
@@ -78,12 +79,19 @@ const defaultRecord: Partial<RunRecord> = {
   record.completed_at = utils.now();
   record.progress.push({ type: 'run', subtype: 'complete', timestamp: utils.now() });
   utils.save(record, file);
-  try {
-    record.archival = await archiveMemory(repo, record, config);
-  } catch (error) {
-    record.archival = { status: 'failed', reason: error instanceof Error ? error.message : String(error) };
-  }
-  utils.save(record, file);
+   let archiveError = null;
+   let archivalResult;
+   try {
+     archivalResult = await agentStep(record, file, 'archive', 'epic', () => archiveMemory(repo, record, config));
+   } catch (error) {
+     archiveError = error;
+   }
+   if (archiveError) {
+     record.archival = { status: 'failed', reason: archiveError instanceof Error ? archiveError.message : String(archiveError) };
+   } else {
+     record.archival = archivalResult;
+   }
+   utils.save(record, file);
 }
 
 function hasCheckpoint(repo: string, stage: any, config: any) {

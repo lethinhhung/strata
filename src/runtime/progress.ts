@@ -12,10 +12,11 @@ export interface StageTransition {
 }
 
 export interface AgentTransition {
-  type: 'agent';
-  subtype: 'explore' | 'implement' | 'review' | 'test' | 'validate' | 'archive' | 'epic_coordinator' | 'stage_coordinator';
-  stage_id: string;
-  timestamp: string;
+   type: 'agent';
+   subtype: 'explore' | 'implement' | 'review' | 'test' | 'validate' | 'archive' | 'epic_coordinator' | 'stage_coordinator';
+   stage_id: string;
+   timestamp: string;
+   duration_ms?: number;
 }
 
 export interface GateTransition {

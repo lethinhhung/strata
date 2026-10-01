@@ -1,6 +1,7 @@
 import * as utils from './utils.js';
 import * as helpers from './helpers.js';
 import { runChecks, setupChecks, workflowChecks } from './checks.js';
+import { agentStep } from './agentStep.js';
 
 export async function runTestGate(args: any) {
   const { record, stage, config, file } = args;
@@ -34,12 +35,10 @@ export async function runTestGate(args: any) {
 export async function createTests(args: any) {
   const { repo, record, stage, config, file, context, coordination, setupEvidence, review } = args;
   const before = utils.runSnapshot(repo, record, file);
-  record.progress.push({ type: 'agent', subtype: 'test', stage_id: stage.id, timestamp: utils.now() });
-  utils.save(record, file);
-  const tested = await utils.askScoped(config, 'Test Agent', {
+  const tested = await agentStep(record, file, 'test', stage.id, () => utils.askScoped(config, 'Test Agent', {
     repo,
     text: `Create deterministic tests for this stage; edit test files only. Setup commands ran before this phase. If setup failed, report the exact blocker. Do not claim checks passed without evidence.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nTASK:\n${coordination.test_task}\nSETUP EVIDENCE:\n${utils.json(setupEvidence)}\nREVIEW FINDINGS:\n${utils.json(review.findings ?? [])}`,
-  }, context, { allowedPath: (target: string) => helpers.isTestPath(target) });
+  }, context, { allowedPath: (target: string) => helpers.isTestPath(target) }));
   const changed = utils.changes(before, utils.runSnapshot(repo, record, file));
   const violations = [...changed.filter((target: string) => !helpers.isTestPath(target)), ...tested.discarded];
   helpers.addPhase(stage, 'test', tested.result, {

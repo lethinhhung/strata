@@ -1,6 +1,7 @@
 import * as utils from './utils.js';
 import * as helpers from './helpers.js';
 import { RunError } from './types.js';
+import { agentStep } from './agentStep.js';
 
 export async function repairGate(repo: string, record: any, stage: any, config: any, file: string,
   context: string, role: 'implementation' | 'tests', gate: string, findings: unknown, task = '') {
@@ -10,9 +11,7 @@ export async function repairGate(repo: string, record: any, stage: any, config: 
   const attempt = record.events.filter((event: any) => event.type === 'repair' && event.stage_id === stage.id && event.details?.gate === gate).length + 1;
   record.events.push({ type: 'repair', stage_id: stage.id, attempt, details: { gate, role, findings }, at: utils.now() });
   const before = utils.runSnapshot(repo, record, file);
-  record.progress.push({ type: 'agent', subtype, stage_id: stage.id, timestamp: utils.now() });
-  utils.save(record, file);
-  const result = await utils.askScoped(config, agent, {
+  const result = await agentStep(record, file, subtype, stage.id, () => utils.askScoped(config, agent, {
     repo,
     text: `Repair the ${gate} gate (repair ${attempt}) using the findings and evidence below. Choose any relevant project files needed to resolve the failure; the original stage scope is context, not a repair limit. Test Agent edits test files only. Implement Agent edits source and configuration files only. Preserve unrelated work, specs, memory, and run records. Fix the underlying cause; never weaken a test or hide a production defect. After edits, report what changed and what still blocks the gate.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nROUTED TASK:\n${task}\nGATE FINDINGS:\n${utils.json(findings)}`,
   }, context, {
@@ -25,7 +24,7 @@ export async function repairGate(repo: string, record: any, stage: any, config: 
       : !helpers.isTestPath(target) && !target.startsWith('specs/') &&
         !target.startsWith('memory/') && !target.startsWith('docs/temps/') &&
         target !== record.epic_path && target !== file,
-  });
+  }));
   const changed = utils.changes(before, utils.runSnapshot(repo, record, file));
   const violations = result.discarded;
   helpers.addPhase(stage, phase, result.result, {
