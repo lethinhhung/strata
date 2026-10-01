@@ -33,11 +33,12 @@ const defaultRecord: Partial<RunRecord> = {
   // Now record is guaranteed to have all fields of RunRecord
   const changed = utils.changes(new Map(), utils.runSnapshot(repo, record, file));
   // A resumed run may share a worktree with changes left by earlier stages or
-  // made after the run began. Commit only this stage's paths and leave the rest
-  // untouched; runStage enforces ownership on changes made during each phase.
+  // made after the run began. Commit only this stage's planned or agent-reported
+  // paths and leave unrelated files untouched.
   const eligible = changed.filter((filePath: string) =>
     !filePath.startsWith('specs/') && !filePath.startsWith('docs/temps/') &&
-    (inScope(filePath, stage.scope ?? []) || (stage.test_repair_paths ?? []).includes(filePath)));
+    (inScope(filePath, stage.scope ?? []) || (stage.accepted_paths ?? []).includes(filePath) ||
+      (stage.test_repair_paths ?? []).includes(filePath)));
   if (config.workflow.checkpoint) {
     if (!eligible.length && !stage.checkpoint_commit) throw new RunError(`No files to checkpoint for stage ${stage.id}`);
     if (eligible.length) {

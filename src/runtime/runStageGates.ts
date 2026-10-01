@@ -72,6 +72,7 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
     };
     const repaired = await repairGate(repo, record, stage, config, file, context, role,
       failedChecks.length ? 'test' : 'coordinator', routedFindings, decision.repair_task ?? '');
+    stage.accepted_paths = [...new Set([...(stage.accepted_paths ?? []), ...repaired.changed])];
     if (role !== 'tests') {
       for (const target of repaired.changed) if (!sourcePaths.includes(target)) sourcePaths.push(target);
     } else {
@@ -99,7 +100,7 @@ async function coordinateGate(repo: string, record: any, stage: any, config: any
     const result = await agentStep(record, file, 'stage_coordinator', stage.id, () => utils.askReadOnly(config, 'Stage Coordinator', {
     repo,
     shape: '{"decision":"ready|repair|blocked","repair_role":"project-defined agent role","repair_task":"...","rationale":"..."}',
-    text: `Decide the next action for this stage using the project-defined policy. Specialist reports are opinions; interpret them against project rules and the stage contract. Configured command evidence is authoritative: if any command has gate_passed=false, do not choose ready; route a concrete repair to the project-defined role best able to fix the cause. Choose ready when the contract is met and configured commands pass, even if a specialist report disagrees and you judge its concern inapplicable. Choose blocked only when you identify a concrete external or policy blocker that another agent action cannot repair. Do not edit files. Summarize check output to the actionable lines; the complete evidence is stored in the run record.
+    text: `Decide the next action for this stage using the project-defined policy. Specialist reports are opinions; interpret them against project rules and the stage contract. Planned scope is a focus guide; judge every changed path by its relevance to the objective, allowing necessary project configuration, manifests, lockfiles, and integration files outside planned scope. Configured command evidence is authoritative: if any command has gate_passed=false, do not choose ready; route a concrete repair to the project-defined role best able to fix the cause. Choose ready when the contract is met and configured commands pass, even if a specialist report disagrees and you judge its concern inapplicable. Choose blocked only when you identify a concrete external or policy blocker that another agent action cannot repair. Do not edit files. Summarize check output to the actionable lines; the complete evidence is stored in the run record.
 CONTRACT:
 ${utils.json(helpers.stageContract(stage))}
 STAGE PLAN:
