@@ -16,7 +16,7 @@ const defaultRecord: Partial<RunRecord> = {
      epic: '',
      epic_path: '',
      epic_absolute_path: '',
-     config: { worker:{}, strong:{}, workflow:{ max_repairs:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', test_commands:[], quality_checks:[], }, path:undefined },
+     config: { worker:{}, strong:{}, workflow:{ max_repairs:0, review_repair_attempts:0, test_repair_attempts:0, validation_repair_attempts:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', memory_policy:'', test_commands:[], quality_checks:[], setup_commands:[], require_agent_gates:true }, path:undefined },
      memory_consulted: { paths:[], excerpt:'' },
      plan: undefined,
      updated_at: undefined,
@@ -52,13 +52,14 @@ const defaultRecord: Partial<RunRecord> = {
   }
   let final = await finalValidation(repo, record, config, file);
   let repairs = 0;
-  while (!final.passed && repairs < config.workflow.max_repairs) {
-    const target = record.stages.find((stage: any) => stage.id === final.review.target_stage_id) ?? record.stages.slice(-1)[0];
+  while (!final.passed && repairs < config.workflow.validation_repair_attempts) {
+    const targetId = final.review.target_stage_id ?? final.validation.target_stage_id;
+    const target = record.stages.find((stage: any) => stage.id === targetId) ?? record.stages.slice(-1)[0];
     repairs += 1;
-    record.events.push({ type: 'final_repair', stage_id: target.id, findings: final.review.findings, at: utils.now() });
+    record.events.push({ type: 'final_repair', stage_id: target.id, findings: { review: final.review.findings, validation: final.validation.findings, evidence: final.evidence }, at: utils.now() });
     target.status = 'pending';
     utils.save(record, file);
-    await runStageWithRepairs(repo, record, target, config, file, utils.json({ final_review: final.review, evidence: final.evidence }));
+    await runStageWithRepairs(repo, record, target, config, file, utils.json({ final_review: final.review, final_validation: final.validation, evidence: final.evidence }));
     final = await finalValidation(repo, record, config, file);
   }
   if (!final.passed) {

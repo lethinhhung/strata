@@ -37,13 +37,13 @@ Strata is a provider-agnostic CLI runtime for implementing large software featur
 ## 6. Stage Lifecycle
 Each stage follows this ordered lifecycle:
 
-1. **Implement:** An implementer changes source within the stage scope and reports changed paths and checks. It does not write tests, alter specifications, reorder stages, or checkpoint.
+1. **Implement:** Initial implementation stays within stage scope. During gate repair, agents may choose relevant project files beyond that scope to resolve the failure. Implementers change source/configuration; testers change tests. Neither alters specifications, memory, run records, stage ordering, or checkpoints.
 2. **Review:** An independent, read-only reviewer checks the diff against the stage contract, specifications, and repository rules. A pass requires no critical or major issue.
 3. **Test:** A tester creates or runs tests for required behavior, modifying test files only, and reports commands, outcomes, and coverage.
 4. **Validate:** A read-only validator checks specification coverage, review findings, test evidence, configured quality checks, repository rules, and contract integrity.
 5. **Checkpoint:** Only after implementation, review, test, and validation pass, save a stage-identifying Git checkpoint and structured stage result.
 
-Each phase returns a structured result. Gate outcomes come from executed engine evidence, not agent claims. A skipped or unavailable required check does not pass. A failed review, test, or validation may trigger a bounded, scoped repair followed by the required checks again. The Stage Coordinator assigns repair to the role allowed to change the affected files: implementers repair source; testers repair tests. Record every attempt and outcome. If repair is exhausted, a required gate cannot pass, or checkpointing fails, halt the run and preserve failure details and resumable state. Do not attempt later stages after an unrecoverable halt.
+Each phase returns a structured result. Gate outcomes come from executed engine evidence, not agent claims. A skipped or unavailable required check does not pass. Review, test, and validation failures use separate bounded repair budgets (`review_repair_attempts`, `test_repair_attempts`, and `validation_repair_attempts`; default 8 each). Route each failure to the role allowed to change the affected files: implementers repair source, testers repair tests. After a repair, rerun the failed gate and any downstream gates affected by the change. Record every attempt and outcome. If repair is exhausted, a required gate cannot pass, or checkpointing fails, halt the run and preserve failure details and resumable state. Do not attempt later stages after an unrecoverable halt.
 
 ## 7. Run Completion and Memory
 - Resume from the original plan and checkpoint identities. Skip a completed stage only when its checkpoint exists; do not silently reorder or renumber stages.

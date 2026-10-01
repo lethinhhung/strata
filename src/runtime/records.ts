@@ -1,4 +1,5 @@
 import type { ProgressEntry } from './progress.js';
+import type { Workflow } from '../workflowConfig.js';
 
 export interface Stage {
   id: string;
@@ -17,8 +18,7 @@ export interface Event { type: 'repair' | 'final_repair'; stage_id: string; atte
 export interface ArchivistResult { status: 'complete'; entries: number; path: string }
 export interface Config {
   worker: any; strong: any;
-  workflow: { max_repairs: number; checkpoint: boolean; checkpoint_prefix: string; spec_paths: string[];
-    memory_path: string; test_commands: any[]; quality_checks: any[] };
+  workflow: Workflow;
   path?: string;
 }
 export interface MemoryConsulted { paths: string[]; excerpt: string }

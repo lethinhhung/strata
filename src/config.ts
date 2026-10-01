@@ -18,6 +18,9 @@ timeout_seconds = 1800
 
 [workflow]
 max_repairs = 2
+review_repair_attempts = 8
+test_repair_attempts = 8
+validation_repair_attempts = 8
 checkpoint = true
 checkpoint_prefix = "strata"
 spec_paths = ["specs"]
