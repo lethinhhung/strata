@@ -21,6 +21,7 @@ Default: Codex. A project may select another configured provider and model.
 - Ask agents to run relevant checks as part of fixing issues; request Strata to rerun configured project checks to capture authoritative results.
 - Adapt the agent sequence or assignment when the current approach is not making progress. Surface concrete blockers, missing user decisions, or external dependencies rather than silently abandoning the stage.
 - Decide when the project's stage acceptance criteria are met and request a stage commit from Strata.
+- Treat planned stage scope as a focus guide. Authorize tightly related project configuration, package manifests, lockfiles, and integration files when required by the objective, and ensure the final review accounts for every changed path.
 - Return a concise stage report describing completed work, decisions, check evidence, commit, remaining issues, and any blockers.
 
 ## Boundaries

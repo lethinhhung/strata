@@ -24,7 +24,7 @@ export async function runStage(repo: string, record: any, stage: any, config: an
   const coordination = await agentStep(record, file, 'stage_coordinator', stage.id, () => utils.askReadOnly(config, 'Stage Coordinator', {
     repo,
     shape: '{"agent_tasks":[{"role":"project-defined role","task":"...","read_only":false}],"run_review":true,"run_tests":true,"run_validation":true,"implementation_task":"...","review_focus":[],"test_task":"...","validation_requirements":[],"memory_handoff":"..."}',
-    text: `Coordinate this stage with a fresh context. Do not implement. Follow project role definitions and acceptance criteria. You may create an ordered agent_tasks list using any project-defined roles; each task must be concrete and in this stage's scope. Mark read_only when a role should not edit. Decide whether the default review, test-authoring, and validation specialists are useful with run_review, run_tests, and run_validation. If there are no custom agent_tasks, provide implementation_task for the default Implement Agent. Include project-appropriate handoffs and prior repair findings.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nEXPLORE FINDINGS:\n${utils.json(exploration)}\nMEMORY:\n${record.memory_consulted.excerpt}\nPRIOR RESULTS:\n${utils.json(stage.phase_results)}\nREPAIR FINDINGS:\n${repairContext}`,
+    text: `Coordinate this stage with a fresh context. Do not implement. Follow project role definitions and acceptance criteria. Treat stage scope as the planned focus, not a hard file boundary: identify necessary related project configuration, manifests, lockfiles, and integration files from exploration, and authorize work on them when relevant. You may create an ordered agent_tasks list using any project-defined roles; each task must be concrete and related to the stage objective. Mark read_only when a role should not edit. Decide whether the default review, test-authoring, and validation specialists are useful with run_review, run_tests, and run_validation. If there are no custom agent_tasks, provide implementation_task for the default Implement Agent. Include project-appropriate handoffs and prior repair findings.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nEXPLORE FINDINGS:\n${utils.json(exploration)}\nMEMORY:\n${record.memory_consulted.excerpt}\nPRIOR RESULTS:\n${utils.json(stage.phase_results)}\nREPAIR FINDINGS:\n${repairContext}`,
   }, specContext, { strong: true }));
   helpers.addPhase(stage, 'stage_coordination', coordination);
   utils.save(record, file);
@@ -43,11 +43,9 @@ export async function runStage(repo: string, record: any, stage: any, config: an
       const role = task.role.trim();
       const result = await agentStep(record, file, 'custom', stage.id, () => utils.askScoped(config, role, {
         repo,
-        text: `Complete your assigned project role task within the stage contract and your project role definition. Preserve unrelated work and report concrete changes and outcomes.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nASSIGNED TASK:\n${task.task}\nPRIOR AGENT HANDOFFS:\n${utils.json(handoffs)}\nREPAIR FINDINGS:\n${repairContext}`,
+        text: `Complete your assigned project role task in service of the stage objective and follow your project role definition. Stage scope is the planned focus, not a hard file boundary; make necessary related project configuration, manifest, lockfile, or integration changes when the task requires them. Preserve unrelated work and report concrete changes and outcomes.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nASSIGNED TASK:\n${task.task}\nPRIOR AGENT HANDOFFS:\n${utils.json(handoffs)}\nREPAIR FINDINGS:\n${repairContext}`,
       }, specContext, {
-        allowedPath: (filePath: string) => !task.read_only && helpers.inScope(filePath, stage.scope) &&
-          !filePath.startsWith('specs/') && !filePath.startsWith('memory/') &&
-          !filePath.startsWith('docs/temps/') && filePath !== record.epic_path && filePath !== file,
+        allowedPath: (filePath: string) => !task.read_only && isAllowedProjectPath(filePath, repo, record, file),
       }), role);
       handoffs.push({ role, result: result.result, attempted: result.attempted, discarded: result.discarded });
       attempted.push(...result.attempted);
@@ -64,20 +62,20 @@ export async function runStage(repo: string, record: any, stage: any, config: an
   } else {
     implementationAttempt = await agentStep(record, file, 'implement', stage.id, () => utils.askScoped(config, 'Implement Agent', {
       repo,
-      text: `Implement or repair the source change within this stage scope. Edit production source files only. Do not edit tests, specs, memory, run records, or unrelated files. Use the reported gate findings to fix the underlying cause, and avoid changing tests to conceal a production defect. Return observed changed paths and checks.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.implementation_task}\nREPAIR FINDINGS:\n${repairContext}`,
+      text: `Implement or repair the source change for this stage. Stage scope is the planned focus, not a hard file boundary; make necessary related project configuration, manifests, lockfiles, and integration changes when required by the task. Edit production and project-support files only. Do not edit tests, specs, memory, run records, or unrelated files. Use the reported gate findings to fix the underlying cause, and avoid changing tests to conceal a production defect. Return observed changed paths and checks.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.implementation_task}\nREPAIR FINDINGS:\n${repairContext}`,
     }, specContext, {
-      allowedPath: (filePath: string) => isAllowedRolePath(filePath, false, stage, record),
+      allowedPath: (filePath: string) => isAllowedRolePath(filePath, false, record, repo, file),
     }));
     implementation = implementationAttempt.result;
   }
 
   const implementChanges = utils.changes(beforeImplement, utils.runSnapshot(repo, record, file));
   const retainedSourceChanges = [...Array.from(utils.runSnapshot(repo, record, file).keys())]
-    .filter((filePath: string) => helpers.inScope(filePath, stage.scope));
+    .filter((filePath: string) => helpers.inScope(filePath, stage.scope) || (stage.accepted_paths ?? []).includes(filePath));
   if (stage.checkpoint_commit) {
     const checkpointedPaths = utils.git(repo, ['show', '--format=', '--name-only', stage.checkpoint_commit]).stdout
       .split('\n').map((filePath: string) => filePath.trim()).filter(Boolean)
-      .filter((filePath: string) => helpers.inScope(filePath, stage.scope));
+      .filter((filePath: string) => helpers.inScope(filePath, stage.scope) || (stage.accepted_paths ?? []).includes(filePath));
     retainedSourceChanges.push(...checkpointedPaths);
   }
   const effectiveImplementChanges = (implementChanges.length ? implementChanges : Array.from(new Set(retainedSourceChanges)).sort());
@@ -86,18 +84,35 @@ export async function runStage(repo: string, record: any, stage: any, config: an
     attempted_changed_paths: implementationAttempt.attempted,
     discarded_changed_paths: implementationAttempt.discarded,
   });
+  stage.accepted_paths = [...new Set([...(stage.accepted_paths ?? []), ...implementChanges])];
   const implementationViolations = implementationAttempt.discarded;
   utils.save(record, file);
-  if (implementationViolations.length) throw new RunError(`Agent attempted files outside its assigned scope: ${implementationViolations.join(', ')}`);
+  if (implementationViolations.length) throw new RunError(`Stage agents attempted protected or role-owned files: ${implementationViolations.join(', ')}`);
   if (!implementationCanProceed(implementation.status, false, effectiveImplementChanges, Boolean(repairContext))) {
-    return { passed: false, reason: 'Stage agents reported no in-scope changes', findings: implementation.findings ?? implementation.handoffs ?? [] };
+    return { passed: false, reason: 'Stage agents reported no changes relevant to the stage', findings: implementation.findings ?? implementation.handoffs ?? [] };
   }
   return runStageGates(repo, record, stage, config, file, specContext, coordination, repairContext,
     implementation, implementationAttempt, implementChanges, effectiveImplementChanges);
 }
 
-function isAllowedRolePath(filePath: string, testOnly: boolean, stage: any, record: any) {
-  if (helpers.isTestPath(filePath) !== testOnly || filePath.startsWith('specs/') || filePath === record.epic_path) return false;
-  // Failed checks can concern existing project-wide tests, while initial production work stays stage-scoped.
-  return testOnly || helpers.inScope(filePath, stage.scope);
+function isAllowedRolePath(filePath: string, testOnly: boolean, record: any, repo: string, file: string) {
+  return helpers.isTestPath(filePath) === testOnly && isAllowedProjectPath(filePath, repo, record, file);
+}
+
+function isAllowedProjectPath(filePath: string, repo: string, record: any, runFile: string) {
+  const normalized = filePath.replace(/\\/g, '/');
+  if (normalized.startsWith('/') || normalized === '..' || normalized.startsWith('../')) return false;
+  const normalizedRepo = repo.replace(/\\/g, '/').replace(/\/$/, '');
+  const toRelative = (target: string | undefined) => {
+    if (!target) return '';
+    const normalizedTarget = target.replace(/\\/g, '/');
+    return normalizedTarget.startsWith(`${normalizedRepo}/`)
+      ? normalizedTarget.slice(normalizedRepo.length + 1)
+      : normalizedTarget;
+  };
+  const epicPath = toRelative(record.epic_path || record.epic_absolute_path);
+  const runRecordPath = toRelative(runFile);
+  return !normalized.startsWith('specs/') && !normalized.startsWith('memory/') &&
+    !normalized.startsWith('docs/temps/') && !normalized.startsWith('.strata/') &&
+    normalized !== epicPath && normalized !== runRecordPath;
 }

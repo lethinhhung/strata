@@ -11,6 +11,7 @@ export async function createTests(args: any) {
   }, context, { allowedPath: (target: string) => helpers.isTestPath(target) }));
   const changed = utils.changes(before, utils.runSnapshot(repo, record, file));
   const violations = [...changed.filter((target: string) => !helpers.isTestPath(target)), ...tested.discarded];
+  stage.accepted_paths = [...new Set([...(stage.accepted_paths ?? []), ...changed.filter((target: string) => helpers.isTestPath(target))])];
   helpers.addPhase(stage, 'test', tested.result, {
     observed_changed_paths: changed, attempted_changed_paths: tested.attempted,
     discarded_changed_paths: tested.discarded, scope_violations: violations,

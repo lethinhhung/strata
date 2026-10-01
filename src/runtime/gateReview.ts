@@ -15,7 +15,7 @@ async function reviewOnce(args: any) {
   try {
     review = await agentStep(record, file, 'review', stage.id, () => utils.askReadOnly(config, 'Review Agent', {
       repo,
-      text: `Review the production diff against the stage contract, specs, and repo rules. Do not edit files. The supplied diff and phase paths define this stage's scope; ignore unrelated dirty files.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREVIEW FOCUS:\n${utils.json(args.coordination.review_focus ?? [])}\nSTAGE PATH AUDIT:\n${utils.json(stagePathAudit(stage))}\nDIFF:\n${helpers.reviewDiff(repo, sourceChanges, stage.checkpoint_commit)}`,
+      text: `Review the production diff against the stage objective, specs, and repo rules. Do not edit files. Planned scope is the primary focus, while necessary project configuration, manifest, lockfile, and integration changes may be relevant outside it. Flag changes that are unrelated or unnecessary to the objective rather than rejecting them only because they are outside planned scope. Ignore unrelated dirty files.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREVIEW FOCUS:\n${utils.json(args.coordination.review_focus ?? [])}\nSTAGE PATH AUDIT:\n${utils.json(stagePathAudit(stage))}\nDIFF:\n${helpers.reviewDiff(repo, sourceChanges, stage.checkpoint_commit)}`,
     }, context, {}));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

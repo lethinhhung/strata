@@ -31,6 +31,7 @@ export async function repairGate(repo: string, record: any, stage: any, config: 
         !target.startsWith('docs/temps/') && target !== record.epic_path && target !== file,
   }), role);
   const changed = utils.changes(before, utils.runSnapshot(repo, record, file));
+  stage.accepted_paths = [...new Set([...(stage.accepted_paths ?? []), ...changed])];
   const violations = result.discarded;
   helpers.addPhase(stage, phase, result.result, {
     observed_changed_paths: changed,
@@ -39,6 +40,6 @@ export async function repairGate(repo: string, record: any, stage: any, config: 
     scope_violations: violations,
   });
   utils.save(record, file);
-  if (violations.length) throw new RunError(`${agent} attempted files outside its assigned scope: ${violations.join(', ')}`);
+  if (violations.length) throw new RunError(`${agent} attempted files outside its role boundary: ${violations.join(', ')}`);
   return { result: result.result, changed };
 }
