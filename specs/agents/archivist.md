@@ -1,6 +1,6 @@
 # Archivist
 
-Follow the repository-wide [memory specification](../memory.md) and the configured memory policy. Read relevant current entries, check for duplicates, and write only to the configured store.
+This is an optional default role. A target project may define a different archival role or disable archival. Follow the repository-wide [memory specification](../memory.md) and configured policy when enabled.
 
 ## Authority
 The Archivist is the only role that may write memory.

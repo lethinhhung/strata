@@ -1,59 +1,38 @@
 # Strata Run Flow
 
-This diagram presents the workflow defined by [core.md](core.md), which is normative if any detail here is unclear.
+This diagram summarizes the workflow in [core.md](core.md). Coordinators and agent instructions are resolved from the target repository as described in [project-profile.md](project-profile.md).
 
 ```mermaid
 flowchart TD
-    U[User submits epic] --> CLI[CLI loads config and epic, detects repository state, initializes persistent run;<br/>save UTC timestamp-prefixed run records in docs/temps/]
-    CLI --> EPIC[Level 1 Epic Coordinator<br/>Strong model]
-    MEM[Load relevant active memory from configured store<br/>Advisory context only] --> EPIC
-    EPIC --> PLAN[Inspect epic and repository<br/>Make architecture decisions<br/>Create stable, dependency-ordered stages and criteria]
-    PLAN --> NEXT{Select next eligible stage}
-    NEXT --> SC[Level 2 Stage Coordinator<br/>Fresh context for this stage]
-    SC --> CTX[Provide stage contract, relevant specs and decisions,<br/>prior results, constraints, and relevant memory]
-    CTX --> EXP[Explore repository with bounded read-only worker tasks]
-    EXP --> TASKS[Stage Coordinator combines findings<br/>and plans scoped implementation work]
-    TASKS --> IMPL[Implementer changes source within stage scope<br/>Returns structured result and changed paths]
-    IMPL --> REVIEW[Independent read-only review<br/>Against stage, specs, rules, and diff]
-    REVIEW --> RG{Review passes?}
-    RG -->|No| REPAIR[Stage Coordinator analyzes evidence<br/>Assign scoped repair to the authorized role]
-    RG -->|Yes| TEST[Tester creates/runs required tests<br/>May modify test files only]
-    TEST --> TG{Tests pass?}
-    TG -->|No| REPAIR
-    TG -->|Yes| VALIDATE[Read-only validation of coverage,<br/>review, tests, and configured quality checks]
-    VALIDATE --> VG{All required gates pass<br/>with engine evidence?}
-    VG -->|No| REPAIR
-    VG -->|Yes| CHECKPOINT[Save stage-identifying Git checkpoint<br/>and structured phase results]
-    CHECKPOINT --> CP{Checkpoint succeeds?}
-    CP -->|No| HALT[Halt and preserve failure details<br/>and resumable state]
-    CP -->|Yes| MORE{More stages remain?}
-    MORE -->|Yes| NEXT
-    MORE -->|No| FINAL[ Epic Coordinator performs final integration review<br/>Checks epic criteria, consistency, regressions, architecture]
-    FINAL --> FV[Run final validation]
-    FV --> FVG{Final validation passes?}
-    FVG -->|No| FREPAIR[Targeted stage repair by authorized role<br/>Then repeat required stage gates and final validation]
-    FREPAIR --> FLIMIT{Final repair budget remains?}
-    FLIMIT -->|Yes, source change| IMPL
-    FLIMIT -->|Yes, test-only change| TEST
-    FLIMIT -->|No| HALT
-    FVG -->|Yes| EPICCP[Save epic checkpoint and complete run result]
-    EPICCP --> ARCH[Archivist captures observed, reusable memory<br/>once after successful run to configured store]
-    ARCH --> DONE[Done]
-
-    REPAIR --> LIMIT{Retry budget remains?}
-    LIMIT -->|Yes, source change| IMPL
-    LIMIT -->|Yes, test-only change| TEST
-    LIMIT -->|No| HALT
-    TEST -. unavailable required test .-> HALT
-    VALIDATE -. unavailable required check .-> HALT
-    ARCH -. archive failure recorded;<br/>run completion unchanged .-> DONE
+    U[User starts Strata with epic and target repo] --> CLI[Thin CLI loads project role definitions, provider mapping, checks, and run state]
+    CLI --> COORD[Coordinator<br/>Default provider: Codex]
+    COORD --> PLAN[Inspect project and epic<br/>Plan stages and acceptance criteria]
+    PLAN --> STAGE[Stage Coordinator<br/>Default provider: Codex]
+    STAGE --> DELEGATE[Choose project-defined roles and sequence]
+    DELEGATE --> AGENTS[Agents<br/>Default provider: OpenCode]
+    AGENTS --> REPORT[Pass findings, changes, check results,<br/>and prior repairs back to Stage Coordinator]
+    REPORT --> DECIDE{Stage Coordinator decides next action}
+    DECIDE -->|Needs work| DELEGATE
+    DECIDE -->|Ready for project checks| CHECKS[Run target project's configured<br/>tests, lint, typecheck, build, etc.]
+    CHECKS --> PASS{Configured checks pass?}
+    PASS -->|No| REPAIR[Route failure evidence and repair history<br/>to the relevant project agent]
+    REPAIR --> AGENTS
+    PASS -->|Yes| COMPLETE{Stage Coordinator marks stage complete?}
+    COMPLETE -->|No; more work| DELEGATE
+    COMPLETE -->|Yes| COMMIT[Commit completed stage in target repo]
+    COMMIT --> COMMITOK{Commit succeeds?}
+    COMMITOK -->|No| RESUME[Keep stage incomplete and resumable]
+    COMMITOK -->|Yes| NEXT{Stages remain?}
+    NEXT -->|Yes| STAGE
+    NEXT -->|No| FINAL[Coordinator integrates stages and checks epic criteria]
+    FINAL -->|Needs fixes| STAGE
+    FINAL -->|Complete| DONE[Record successful run]
 ```
 
 ## Workflow invariants
-
-- A stage follows **implement → review → test → validate → checkpoint**. Exploration and task planning happen before implementation.
-- Phase and gate results are structured. Only executed engine evidence can pass a required gate; skipped or unavailable checks are not passing.
-- Failed review, test, or validation enters a scoped, bounded repair loop. Exhaustion, unavailable required evidence, or checkpoint failure halts execution and preserves resumable state.
-- Stages have stable identities and run in dependency order. Resumption uses the original plan and checkpoint identities.
-- Load relevant memory before planning and delegation. Memory is advisory, not gate evidence. Archive reusable knowledge only once after the whole run succeeds; archive failure does not change run completion.
-- Shared mutations are serialized unless explicitly isolated. Provider-specific behavior belongs in adapters; workflow contracts remain provider-neutral.
+- Strata coordinates providers, context, state, configured project checks, and stage commits. It does not impose universal agent-quality gates or worker ordering.
+- The Coordinator plans and integrates; a Stage Coordinator owns each stage; agents perform project-defined tasks.
+- Project-defined role instructions and applicable automated checks are loaded from the target repository.
+- Failed checks return to the Stage Coordinator with their output and prior repair history; the workflow continues through agent-directed repair until resolved or a concrete blocker is reported.
+- Each completed stage is committed in the selected target repository. Failed checks or commits keep the stage incomplete and resumable.
+- Provider choice is per role. Current defaults are Codex for coordinators and OpenCode for agents.
