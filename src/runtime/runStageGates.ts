@@ -1,71 +1,120 @@
-import { runChecks, setupChecks, workflowChecks } from './checks.js';
+import * as utils from './utils.js';
+import * as helpers from './helpers.js';
 import { repairGate } from './gateRepair.js';
-import { reviewWithRepairs } from './gateReview.js';
-import { createTests, runTestGate } from './gateTests.js';
-import { routeValidationRepair, validateStage } from './gateValidation.js';
+import { reviewStage } from './gateReview.js';
+import { createTests } from './gateTests.js';
+import { runChecks, setupChecks, workflowChecks } from './checks.js';
+import { validateStage } from './gateValidation.js';
+import { agentStep } from './agentStep.js';
 
+/**
+ * Run specialist review and validation as separate calls. Their findings are
+ * context for the Stage Coordinator; configured command evidence is evaluated
+ * by the engine, and the coordinator chooses whether and how to repair.
+ */
 export async function runStageGates(repo: string, record: any, stage: any, config: any, file: string,
   context: string, coordination: any, _repairContext: string, _implementation: any,
   _implementationAttempt: any, _implementChanges: string[], sourceChanges: string[]) {
   const sourcePaths = [...sourceChanges];
-  const reviewArgs = { repo, record, stage, config, file, context, coordination, sourceChanges: sourcePaths,
-    required: config.workflow.require_agent_gates, limit: config.workflow.review_repair_attempts ?? 8 };
-  const repair = async (role: 'implementation' | 'tests', findings: unknown, gate: string, task = '') => {
-    const result = await repairGate(repo, record, stage, config, file, context, role, gate, findings, task);
-    if (role === 'implementation') for (const target of result.changed) if (!sourcePaths.includes(target)) sourcePaths.push(target);
-    return result;
-  };
-  let review = await reviewWithRepairs({ ...reviewArgs, repair: (findings: unknown) => repair('implementation', findings, 'review') });
-  if (config.workflow.require_agent_gates && !review.passed) return failure(review, undefined, undefined, 'review');
-  const setupEvidence = runChecks(repo, setupChecks(config.workflow), 'setup');
-  const initialTest = await createTests({ repo, record, stage, config, file, context, coordination, setupEvidence, review: review.review });
   const checks = workflowChecks(config.workflow);
-  const initialEvidence = [...setupEvidence, ...runChecks(repo, checks)];
-  let tests = await runTestGate({ repo, record, stage, config, file, context, coordination, tester: initialTest.result,
-    testViolations: initialTest.violations, initialEvidence, limit: config.workflow.test_repair_attempts ?? 8, repair,
-    reviewAfterSourceRepair: async () => {
-      review = await reviewWithRepairs({ ...reviewArgs, used: review.used, repair: (findings: unknown) => repair('implementation', findings, 'review') });
-    } });
-  if (!tests.passed) return failure(review, tests, undefined, 'test');
-  let validation = await validateStage({ repo, record, stage, config, file, context, coordination,
-    review: review.review, tester: tests.tester, evidence: tests.evidence });
-  let validationRepairs = 0;
-  while (config.workflow.require_agent_gates && !validation.passed && validationRepairs < (config.workflow.validation_repair_attempts ?? 8)) {
-    validationRepairs += 1;
-    if (validation.agent_error) {
-      validation = await validateStage({ repo, record, stage, config, file, context, coordination,
-        review: review.review, tester: tests.tester, evidence: tests.evidence });
-      continue;
+  const setup = setupChecks(config.workflow);
+  const reviewArgs = {
+    repo, record, stage, config, file, context, coordination, sourceChanges: sourcePaths,
+  };
+
+  let setupEvidence = runChecks(repo, setup, 'setup');
+  let evidence = [...setupEvidence, ...runChecks(repo, checks)];
+  let review = coordination.run_review === false
+    ? { review: { status: 'skipped', findings: [] }, passed: true }
+    : await reviewStage(reviewArgs);
+  let testAgent = coordination.run_tests === false
+    ? { result: { status: 'skipped', findings: [] }, violations: [] }
+    : await createTests({ repo, record, stage, config, file, context, coordination, setupEvidence, review: review.review });
+  setupEvidence = runChecks(repo, setup, 'setup');
+  evidence = [...setupEvidence, ...runChecks(repo, checks)];
+
+  while (true) {
+    const validation = coordination.run_validation === false
+      ? { validation: { status: 'skipped', findings: [] }, passed: true }
+      : await validateStage({ repo, record, stage, config, file, context, coordination, review: review.review, tester: testAgent.result, evidence });
+    const decision = await coordinateGate(repo, record, stage, config, file, context, {
+      coordination, review: review.review, tester: testAgent.result,
+      test_scope_violations: testAgent.violations,
+      validation: validation.validation, evidence,
+      repairHistory: stage.phase_results.filter((item: any) => item.phase === 'implement_repair' || item.phase === 'test_repair' || item.phase.startsWith('repair_')),
+    });
+
+    const failedChecks = evidence.filter((item: any) => !item.gate_passed);
+    if (!failedChecks.length && decision.decision === 'ready') {
+      return { passed: true, reason: '', findings: { review: review.review, validation: validation.validation, evidence } };
     }
-    const route = await routeValidationRepair({ repo, record, stage, config, file, context, tester: tests.tester, evidence: tests.evidence }, validation.validation);
-    const role = route.repair_role === 'tests' ? 'tests' : 'implementation';
-    const repaired = await repair(role, { validation: validation.validation, evidence: tests.evidence }, 'validation', route.repair_task ?? '');
-    if (role === 'implementation') {
-      review = await reviewWithRepairs({ ...reviewArgs, used: review.used, repair: (findings: unknown) => repair('implementation', findings, 'review') });
-      if (config.workflow.require_agent_gates && !review.passed) break;
+    if (decision.decision === 'blocked') {
+      return {
+        passed: false,
+        blocked: true,
+        reason: decision.rationale || 'Stage Coordinator identified a blocker; run is resumable',
+        findings: { review: review.review, tester: testAgent.result, validation: validation.validation, evidence, decision },
+      };
+    }
+
+    const role = typeof decision.repair_role === 'string' && decision.repair_role
+      ? decision.repair_role : 'implementation';
+    const routedFindings = {
+      coordinator_rationale: decision.rationale ?? '',
+      repair_task: decision.repair_task ?? '',
+      review: review.review,
+      tester: testAgent.result,
+      test_scope_violations: testAgent.violations,
+      validation: validation.validation,
+      failed_checks: failedChecks,
+      evidence,
+    };
+    const repaired = await repairGate(repo, record, stage, config, file, context, role,
+      failedChecks.length ? 'test' : 'coordinator', routedFindings, decision.repair_task ?? '');
+    if (role !== 'tests') {
+      for (const target of repaired.changed) if (!sourcePaths.includes(target)) sourcePaths.push(target);
     } else {
-      tests = { ...tests, tester: repaired.result, passed: false };
+      testAgent = { result: repaired.result, violations: [] };
     }
-    tests = await runTestGate({ repo, record, stage, config, file, context, coordination, tester: tests.tester,
-      testViolations: [], limit: (config.workflow.test_repair_attempts ?? 8) - tests.used, used: tests.used, repair,
-      reviewAfterSourceRepair: async () => {
-        review = await reviewWithRepairs({ ...reviewArgs, used: review.used, repair: (findings: unknown) => repair('implementation', findings, 'review') });
-      } });
-    if (!tests.passed) break;
-    validation = await validateStage({ repo, record, stage, config, file, context, coordination,
-      review: review.review, tester: tests.tester, evidence: tests.evidence });
+
+    setupEvidence = runChecks(repo, setup, 'setup');
+    evidence = [...setupEvidence, ...runChecks(repo, checks)];
+    review = coordination.run_review === false
+      ? { review: { status: 'skipped', findings: [] }, passed: true }
+      : await reviewStage(reviewArgs);
   }
-  const passed = tests.passed && (!config.workflow.require_agent_gates || (review.passed && validation.passed));
-  if (passed) return { passed: true, reason: '', findings: {} };
-  const failedGate = !review.passed && config.workflow.require_agent_gates ? 'review'
-    : !tests.passed ? 'test' : 'validation';
-  return failure(review, tests, validation, failedGate);
 }
 
-function failure(review: any, tests: any, validation: any, gate: string) {
-  const findings = { failed_gate: gate, review: review.review.findings ?? [], test: tests?.tester.findings ?? [],
-    validation: validation?.validation.findings ?? [], evidence: tests?.evidence ?? [] };
-  const blockedChecks = (tests?.evidence ?? []).filter((item: any) => !item.gate_passed).map((item: any) => item.id);
-  const detail = gate === 'test' && blockedChecks.length ? `; failed checks: ${blockedChecks.join(', ')}` : '';
-  return { passed: false, repair_exhausted: true, reason: `Repair budget exhausted for ${gate} gate${detail}`, findings };
+async function coordinateGate(repo: string, record: any, stage: any, config: any, file: string,
+  context: string, reports: any) {
+  try {
+    const result = await agentStep(record, file, 'stage_coordinator', stage.id, () => utils.askReadOnly(config, 'Stage Coordinator', {
+    repo,
+    shape: '{"decision":"ready|repair|blocked","repair_role":"project-defined agent role","repair_task":"...","rationale":"..."}',
+    text: `Decide the next action for this stage using the project-defined policy. Specialist reports are opinions; interpret them against project rules and the stage contract. Configured command evidence is authoritative: if any command has gate_passed=false, do not choose ready; route a concrete repair to the project-defined role best able to fix the cause. Choose ready when the contract is met and configured commands pass, even if a specialist report disagrees and you judge its concern inapplicable. Choose blocked only when you identify a concrete external or policy blocker that another agent action cannot repair. Do not edit files.
+CONTRACT:
+${utils.json(helpers.stageContract(stage))}
+STAGE PLAN:
+${utils.json(reports.coordination)}
+LATEST REPORTS AND CHECK EVIDENCE:
+${utils.json(reports)}
+STAGE PATH AUDIT:
+${utils.json(stage.phase_results.map((phase: any) => ({ phase: phase.phase, observed_changed_paths: phase.observed_changed_paths ?? [], attempted_changed_paths: phase.attempted_changed_paths ?? [], discarded_changed_paths: phase.discarded_changed_paths ?? [] })))}`,
+    }, utils.phaseContext(repo, config), { strong: true }));
+    return normalizeDecision(result);
+  } catch (error) {
+    return { decision: 'blocked', rationale: `Could not obtain a Stage Coordinator decision: ${String(error)}` };
+  }
+}
+
+function normalizeDecision(result: any) {
+  const decision = String(result?.decision ?? '').toLowerCase();
+  if (decision === 'ready' || decision === 'blocked' || decision === 'repair') return { ...result, decision };
+  // Missing structured output must never turn a failing command into success.
+  return {
+    decision: 'repair',
+    repair_role: 'implementation',
+    repair_task: 'The previous coordinator response did not include a valid decision. Re-examine the reported evidence and fix the outstanding issue.',
+    rationale: 'Coordinator response was missing a valid decision.',
+  };
 }

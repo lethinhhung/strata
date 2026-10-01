@@ -12,6 +12,7 @@ const usage = `Strata — specification-led feature implementation runtime
 Usage:
   strata init [--repo DIR] [--force]
   strata run EPIC [--repo DIR] [--config FILE]
+  strata run --prompt TEXT [--repo DIR] [--config FILE]
   strata resume RUN_ID_OR_FILE [--repo DIR] [--config FILE]
   strata status [RUN_ID_OR_FILE] [--repo DIR]
   strata config-example
@@ -37,7 +38,7 @@ export function args(argv: string[]): Args {
     if (token === '--help' || token === '-h') options.help = true;
     else if (token === '--version') options.version = true;
     else if (token === '--force') options.force = true;
-    else if (token === '--repo' || token === '--config') {
+    else if (token === '--repo' || token === '--config' || token === '--prompt') {
       if (!argv[i + 1]) throw new Error(`${token} requires a value`);
       options[token.slice(2)] = argv[++i];
     } else if (token.startsWith('-')) throw new Error(`Unknown option ${token}`);
@@ -84,8 +85,9 @@ async function main(): Promise<number> {
   }
   const config = loadConfig(repo, options.config);
   if (command === 'run') {
-    if (!positional[1]) throw new Error('run requires an epic file');
-    const record = await startRun(repo, positional[1], config, printProgress);
+    const inlinePrompt = typeof options.prompt === 'string' ? options.prompt : undefined;
+    if (Boolean(positional[1]) === Boolean(inlinePrompt)) throw new Error('run requires exactly one epic file or --prompt TEXT');
+    const record = await startRun(repo, positional[1] ?? '', config, printProgress, inlinePrompt);
     console.log(formatOutcome('run', record, recordPath(repo, record.run_id)));
     return record.status === 'complete' ? 0 : 1;
   }

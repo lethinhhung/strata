@@ -3,20 +3,8 @@ import * as helpers from './helpers.js';
 import { RunError } from './types.js';
 import { agentStep } from './agentStep.js';
 
-export async function reviewWithRepairs(args: any) {
-  let used = args.used ?? 0;
-  let result = await reviewOnce(args);
-  while (args.required && !result.passed && used < args.limit) {
-    used += 1;
-    if (result.agent_error) {
-      result = await reviewOnce(args);
-      continue;
-    }
-    const repaired = await args.repair(result.review.findings ?? []);
-    for (const target of repaired.changed) if (!args.sourceChanges.includes(target)) args.sourceChanges.push(target);
-    result = await reviewOnce(args);
-  }
-  return { ...result, used };
+export async function reviewStage(args: any) {
+  return reviewOnce(args);
 }
 
 async function reviewOnce(args: any) {

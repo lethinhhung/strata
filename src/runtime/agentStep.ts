@@ -4,9 +4,9 @@ import { save } from './save.js';
 type AgentSubtype = Extract<ProgressEntry, { type: 'agent' }>['subtype'];
 
 export async function agentStep<T>(record: any, file: string, subtype: AgentSubtype,
-  stageId: string, action: () => Promise<T>): Promise<T> {
+  stageId: string, action: () => Promise<T>, role?: string): Promise<T> {
   const entry: Extract<ProgressEntry, { type: 'agent' }> = {
-    type: 'agent', subtype, stage_id: stageId, timestamp: new Date().toISOString(),
+    type: 'agent', subtype, stage_id: stageId, timestamp: new Date().toISOString(), ...(role ? { role } : {}),
   };
   record.progress.push(entry);
   save(record, file, false);

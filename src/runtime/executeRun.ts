@@ -52,11 +52,9 @@ const defaultRecord: Partial<RunRecord> = {
     await runStageWithRepairs(repo, record, stage, config, file, repairContext);
   }
   let final = await finalValidation(repo, record, config, file);
-  let repairs = 0;
-  while (!final.passed && repairs < config.workflow.validation_repair_attempts) {
+  while (!final.passed) {
     const targetId = final.review.target_stage_id ?? final.validation.target_stage_id;
     const target = record.stages.find((stage: any) => stage.id === targetId) ?? record.stages.slice(-1)[0];
-    repairs += 1;
     record.events.push({ type: 'final_repair', stage_id: target.id, findings: { review: final.review.findings, validation: final.validation.findings, evidence: final.evidence }, at: utils.now() });
     target.status = 'pending';
     utils.save(record, file);
