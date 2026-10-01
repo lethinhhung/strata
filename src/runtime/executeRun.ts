@@ -3,6 +3,7 @@ import * as utils from './utils.js';
 import { runStageWithRepairs } from './runStageWithRepairs.js';
 import { finalValidation } from './finalValidation.js';
 import { archiveMemory } from './archiveMemory.js';
+import { agentStep } from './agentStep.js';
 
 export async function executeRun(repo: string, record: any, config: any, file: string) {
   // Ensure record has all required fields
@@ -78,17 +79,12 @@ const defaultRecord: Partial<RunRecord> = {
   record.completed_at = utils.now();
   record.progress.push({ type: 'run', subtype: 'complete', timestamp: utils.now() });
   utils.save(record, file);
-const archiveStart = Date.now();
    let archiveError = null;
    let archivalResult;
    try {
-     archivalResult = await archiveMemory(repo, record, config);
+     archivalResult = await agentStep(record, file, 'archive', 'epic', () => archiveMemory(repo, record, config));
    } catch (error) {
      archiveError = error;
-   } finally {
-     const archiveEnd = Date.now();
-     const archiveDuration = archiveEnd - archiveStart;
-     record.progress.push({ type: 'agent', subtype: 'archive', stage_id: 'epic', timestamp: utils.now(), duration_ms: archiveDuration });
    }
    if (archiveError) {
      record.archival = { status: 'failed', reason: archiveError instanceof Error ? archiveError.message : String(archiveError) };

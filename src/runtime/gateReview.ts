@@ -1,6 +1,7 @@
 import * as utils from './utils.js';
 import * as helpers from './helpers.js';
 import { RunError } from './types.js';
+import { agentStep } from './agentStep.js';
 
 export async function reviewWithRepairs(args: any) {
   let used = args.used ?? 0;
@@ -21,15 +22,13 @@ export async function reviewWithRepairs(args: any) {
 async function reviewOnce(args: any) {
   const { repo, record, stage, config, file, context, sourceChanges } = args;
   const before = utils.runSnapshot(repo, record, file);
-  record.progress.push({ type: 'agent', subtype: 'review', stage_id: stage.id, timestamp: utils.now() });
-  utils.save(record, file);
   let review: any;
   let agentError = false;
   try {
-    review = await utils.askReadOnly(config, 'Review Agent', {
+    review = await agentStep(record, file, 'review', stage.id, () => utils.askReadOnly(config, 'Review Agent', {
       repo,
       text: `Review the production diff against the stage contract, specs, and repo rules. Do not edit files. The supplied diff and phase paths define this stage's scope; ignore unrelated dirty files.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nREVIEW FOCUS:\n${utils.json(args.coordination.review_focus ?? [])}\nSTAGE PATH AUDIT:\n${utils.json(stagePathAudit(stage))}\nDIFF:\n${helpers.reviewDiff(repo, sourceChanges, stage.checkpoint_commit)}`,
-    }, context, {});
+    }, context, {}));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     review = { status: 'fail', summary: 'Review Agent could not complete', findings: [message] };

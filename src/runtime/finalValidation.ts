@@ -1,6 +1,7 @@
 import * as utils from './utils.js';
 import { runChecks, setupChecks, workflowChecks } from './checks.js';
 import { RunRecord } from './types.js';
+import { agentStep } from './agentStep.js';
 
 export async function finalValidation(repo: string, record: any, config: any, file: string) {
   // Ensure record has all required fields
@@ -32,23 +33,19 @@ const defaultRecord: Partial<RunRecord> = {
    });
   // Now record is guaranteed to have all fields of RunRecord
   const context = utils.phaseContext(repo, config);
-  record.progress.push({ type: 'agent', subtype: 'epic_coordinator', stage_id: 'epic', timestamp: utils.now() });
-  utils.save(record, file);
-  const review = await utils.askReadOnly(config, 'Epic Coordinator', {
+  const review = await agentStep(record, file, 'epic_coordinator', 'epic', () => utils.askReadOnly(config, 'Epic Coordinator', {
     repo,
     shape: '{"status":"pass|fail","findings":[],"target_stage_id":"optional stage id"}',
     text: `Review epic criteria, cross-stage consistency, regressions, and architecture. Check the latest completed result for each stage. Earlier failed attempts are resolved when followed by a passing attempt and checkpoint; do not treat historical attempts as current failures. The target repository and its Git metadata are available, but do not change files. Use recorded observed changed paths, completed phase results, checkpoint identity, and engine check evidence to assess the work. Return a target_stage_id only for a substantive unresolved issue in completed work.\nEPIC:\n${record.epic}\nSTAGE RESULTS:\n${utils.json(record.stages)}`,
-  }, context, { strong: true });
+  }, context, { strong: true }));
   const checks = workflowChecks(config.workflow);
   const evidence = [...runChecks(repo, setupChecks(config.workflow), 'setup'), ...runChecks(repo, checks, 'final')];
   const beforeValidator = utils.runSnapshot(repo, record, file);
-  record.progress.push({ type: 'agent', subtype: 'validate', stage_id: 'epic', timestamp: utils.now() });
-  utils.save(record, file);
-  const validator = await utils.askReadOnly(config, 'Validate Agent', {
+  const validator = await agentStep(record, file, 'validate', 'epic', () => utils.askReadOnly(config, 'Validate Agent', {
     repo,
     shape: '{"status":"pass|fail","findings":[],"gates":[{"name":"...","passed":true,"evidence":"..."}]}',
     text: `Read-only final validation of epic criteria, stage results, review findings, configured repository checks, rules, and plan integrity. Strata has already applied each check's unavailable policy; use gate_passed as authoritative. A command that runs and exits nonzero fails even when its unavailable policy allows a missing executable. A required test check must be configured. Do not edit files. Stage path audits are authoritative for stage changes; ignore unrelated dirty files.\nEPIC:\n${record.epic}\nSTAGES:\n${utils.json(record.stages)}\nEPIC REVIEW:\n${utils.json(review)}\nENGINE EVIDENCE:\n${utils.json(evidence)}`,
-  }, context, {});
+  }, context, {}));
   const validatorMutations = utils.changes(beforeValidator, utils.runSnapshot(repo, record, file));
   record.final_review = review;
   record.final_validation = { result: validator, observed_changed_paths: validatorMutations };

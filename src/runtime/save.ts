@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { RunRecord } from './types.js';
 
-export function save(record: any, file: string) {
+export function save(record: any, file: string, emitProgress = true) {
   // Ensure record has all required fields
   if (!('progress' in record) || !Array.isArray(record.progress)) {
     record.progress = [];
@@ -38,7 +38,7 @@ const defaultRecord: Partial<RunRecord> = {
   fs.renameSync(temporary, file);
   const listener = record.onProgress as ((entry: any) => void) | undefined;
   const sent = (record.progress_sent as number | undefined) ?? 0;
-  if (listener) {
+  if (listener && emitProgress) {
     for (const entry of record.progress.slice(sent)) listener(entry);
     Object.defineProperty(record, 'progress_sent', { value: record.progress.length, writable: true, configurable: true });
   }
