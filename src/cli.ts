@@ -4,7 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, initConfig, loadConfig } from './config.js';
 import { loadRun, recordPath, resumeRun, RunError, startRun } from './runtime.js';
-import { formatFailure, formatOutcome, printProgress } from './progress.js';
+import type { RunRecord } from './runtime/types.js';
+import { createProgressReporter, formatFailure, formatOutcome } from './progress.js';
 
 const version = '0.1.0';
 const usage = `Strata — specification-led feature implementation runtime
@@ -87,14 +88,26 @@ async function main(): Promise<number> {
   if (command === 'run') {
     const inlinePrompt = typeof options.prompt === 'string' ? options.prompt : undefined;
     if (Boolean(positional[1]) === Boolean(inlinePrompt)) throw new Error('run requires exactly one epic file or --prompt TEXT');
-    const record = await startRun(repo, positional[1] ?? '', config, printProgress, inlinePrompt);
+    const reporter = createProgressReporter();
+    let record: RunRecord;
+    try {
+      record = await startRun(repo, positional[1] ?? '', config, reporter.print, inlinePrompt);
+    } finally {
+      reporter.finish();
+    }
     console.log(formatOutcome('run', record, recordPath(repo, record.run_id)));
     return record.status === 'complete' ? 0 : 1;
   }
   if (command === 'resume') {
     if (!positional[1]) throw new Error('resume requires a run id or record path');
     const file = resolveRun(repo, positional[1]);
-    const record = await resumeRun(repo, file, config, printProgress);
+    const reporter = createProgressReporter();
+    let record: RunRecord;
+    try {
+      record = await resumeRun(repo, file, config, reporter.print);
+    } finally {
+      reporter.finish();
+    }
     console.log(formatOutcome('resume', record, file));
     return record.status === 'complete' ? 0 : 1;
   }
