@@ -4,13 +4,17 @@ import { createHash } from 'node:crypto';
 
 const generatedDirectories = new Set(['.git', 'node_modules', '.expo', '.turbo', 'Pods', '.gradle', 'coverage']);
 
+export function isGeneratedWorkspacePath(relative: string) {
+  return relative.split(/[\\/]/).some((part) => generatedDirectories.has(part));
+}
+
 export function copyWorkspace(source: string, destination: string) {
   fs.cpSync(source, destination, {
     recursive: true,
     filter(item) {
       const relative = path.relative(source, item);
       if (!relative) return true;
-      if (relative.split(path.sep).some((part) => generatedDirectories.has(part))) return false;
+      if (isGeneratedWorkspacePath(relative)) return false;
       return true;
     },
   });
@@ -53,7 +57,7 @@ export function workspaceFiles(root: string): Map<string, string> {
       const full = path.join(directory, entry.name);
       const relative = path.relative(root, full).split(path.sep).join('/');
       if (entry.isDirectory()) {
-        if (!generatedDirectories.has(entry.name)) visit(full);
+        if (!isGeneratedWorkspacePath(relative)) visit(full);
       } else if (entry.isSymbolicLink()) {
         files.set(relative, 'symlink');
       } else if (entry.isFile()) {
