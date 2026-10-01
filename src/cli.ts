@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, initConfig, loadConfig } from './config.js';
 import { loadRun, recordPath, resumeRun, RunError, startRun } from './runtime.js';
 import type { RunRecord } from './runtime/types.js';
+import { args } from './cliArgs.js';
 import { createProgressReporter, formatFailure, formatOutcome } from './progress.js';
+export { args } from './cliArgs.js';
 
 const version = '0.1.0';
 const usage = `Strata — specification-led feature implementation runtime
@@ -18,35 +20,6 @@ Usage:
   strata status [RUN_ID_OR_FILE] [--repo DIR]
   strata config-example
   strata --version`;
-
-interface Args {
-  positional: string[];
-  options: {
-    help?: boolean;
-    version?: boolean;
-    force?: boolean;
-    repo?: string;
-    config?: string;
-    [key: string]: string | boolean | undefined;
-  };
-}
-
-export function args(argv: string[]): Args {
-  const positional: string[] = [];
-  const options: Args['options'] = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i];
-    if (token === '--help' || token === '-h') options.help = true;
-    else if (token === '--version') options.version = true;
-    else if (token === '--force') options.force = true;
-    else if (token === '--repo' || token === '--config' || token === '--prompt') {
-      if (!argv[i + 1]) throw new Error(`${token} requires a value`);
-      options[token.slice(2)] = argv[++i];
-    } else if (token.startsWith('-')) throw new Error(`Unknown option ${token}`);
-    else positional.push(token);
-  }
-  return { positional, options };
-}
 
 function resolveRun(repo: string, reference: string): string {
   const candidate = path.resolve(repo, reference);
