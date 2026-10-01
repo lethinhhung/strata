@@ -2,6 +2,7 @@ import * as utils from './utils.js';
 import * as helpers from './helpers.js';
 import { RunError } from './types.js';
 import { agentStep } from './agentStep.js';
+import { canEditProjectPath } from './editPolicy.js';
 
 export async function repairGate(repo: string, record: any, stage: any, config: any, file: string,
   context: string, role: string, gate: string, findings: unknown, task = '') {
@@ -16,19 +17,9 @@ export async function repairGate(repo: string, record: any, stage: any, config: 
     : 'Report the repair and any remaining findings before handing off.';
   const result = await agentStep(record, file, subtype, stage.id, () => utils.askScoped(config, agent, {
     repo,
-    text: `Repair the ${gate} issue (repair ${attempt}) using the findings and evidence below. Follow your project role definition for file ownership and repair behavior. Choose relevant project files needed to resolve the failure; the original stage scope is context, not a repair limit. Preserve unrelated work, specs, memory, and run records. Fix the underlying cause; never weaken a test or hide a production defect. ${verifyInstruction}\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nROUTED TASK:\n${task}\nGATE FINDINGS:\n${utils.json(findings)}`,
+    text: `Repair the ${gate} issue (repair ${attempt}) using the findings and evidence below. The assigned edit agent may change any task-relevant project files; the original stage scope is context, not a file ownership boundary or repair limit. Preserve unrelated work, specs, memory, and run records. Fix the underlying cause; never weaken a test or hide a production defect. ${verifyInstruction}\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nROUTED TASK:\n${task}\nGATE FINDINGS:\n${utils.json(findings)}`,
   }, context, {
-    allowedPath: (target: string) => role === 'tests'
-      // Test repairs may need to fix a failing test outside the stage's
-      // production/configuration scope. Keep the role boundary strict while
-      // allowing the Test Agent to edit test files anywhere in the repository.
-      ? helpers.isTestPath(target)
-      // Failed checks may require source/config fixes beyond the feature scope.
-      : role === 'implementation' ? !helpers.isTestPath(target) && !target.startsWith('specs/') &&
-        !target.startsWith('memory/') && !target.startsWith('docs/temps/') &&
-        target !== record.epic_path && target !== file
-      : !target.startsWith('specs/') && !target.startsWith('memory/') &&
-        !target.startsWith('docs/temps/') && target !== record.epic_path && target !== file,
+    allowedPath: (target: string) => canEditProjectPath(target, repo, record, file),
   }), role);
   const changed = utils.changes(before, utils.runSnapshot(repo, record, file));
   stage.accepted_paths = [...new Set([...(stage.accepted_paths ?? []), ...changed])];
@@ -40,6 +31,6 @@ export async function repairGate(repo: string, record: any, stage: any, config: 
     scope_violations: violations,
   });
   utils.save(record, file);
-  if (violations.length) throw new RunError(`${agent} attempted files outside its role boundary: ${violations.join(', ')}`);
+  if (violations.length) throw new RunError(`${agent} attempted protected project files: ${violations.join(', ')}`);
   return { result: result.result, changed };
 }
