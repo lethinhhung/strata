@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { RunError } from './types.js';
+import { isGeneratedWorkspacePath } from './workspace.js';
 
 export function git(repo: string, args: string[], { allowFailure = false } = {}) {
   const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
@@ -21,6 +22,7 @@ export function snapshot(repo: string, excludedPaths: string[]) {
   for (let i = 0; i < rows.length && rows[i]; i += 1) {
     const row = rows[i];
     const file = row.slice(3);
+    if (isGeneratedWorkspacePath(file)) continue;
     if (excluded.has(path.resolve(repo, file))) continue;
     if (file.startsWith(`docs${path.sep}temps${path.sep}`) && fs.existsSync(path.resolve(repo, file))) {
       try {

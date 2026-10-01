@@ -56,8 +56,8 @@ export async function ask(config: any, role: string, task: any, context: string,
   const roleDefinition = config.roles?.[roleSlug(role)];
   const verified = role === 'Implement Agent' ? [...task.text.matchAll(/`((?:src|test)\/[^`*]+)`/g)].map((match) => match[1]).filter((file) => fs.existsSync(path.join(task.repo, file))) : [];
   const sourcePaths = verified.length ? `\nVerified existing source paths: ${verified.join(', ')}` : '';
-  const projectInstructions = roleDefinition?.instructions ? `\n\nProject role definition (takes precedence over Strata defaults for this role):\n${roleDefinition.instructions}` : '';
-  const prompt = `You are the Strata ${role}. Follow the supplied Strata specifications and role boundary.${projectInstructions}\nInspect the supplied repository using tools before editing or reporting file existence; verify any missing-path claim against the actual tree.${sourcePaths}\nReturn one JSON object only, matching this shape: ${shape}\n\nTask:\n${task.text}\n\nRepository and supplied context:\n${context}`;
+  const projectInstructions = roleDefinition?.instructions ? `\n\nProject role definition (expertise and workflow guidance):\n${roleDefinition.instructions}` : '';
+  const prompt = `You are the Strata ${role}. Your permission mode is set by this task: edit or read-only. Edit agents may change any task-relevant project files, even when role guidance prefers certain file types; read-only agents must not edit. Role definitions guide expertise and workflow, not file ownership.${projectInstructions}\nInspect the supplied repository using tools before editing or reporting file existence; verify any missing-path claim against the actual tree.${sourcePaths}\nReturn one JSON object only, matching this shape: ${shape}\n\nTask:\n${task.text}\n\nRepository and supplied context:\n${context}`;
   const model = roleDefinition?.model ?? (strong ? config.strong : config.worker);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     let response: string;
