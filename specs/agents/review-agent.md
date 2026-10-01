@@ -11,7 +11,7 @@ Independently assess whether stage changes satisfy their specification and repos
 - Git diff, changed paths, and implementation evidence.
 
 ## Responsibilities
-- Check correctness, omissions, regressions, scope, architecture, and unnecessary changes.
+- Check correctness, omissions, regressions, architecture, and unnecessary changes. Treat planned scope as a focus guide; assess any related project-support changes by their relevance to the objective.
 - Return actionable findings with file references, evidence, and a clear account of unresolved concerns. Severity labels are advisory to the Stage Coordinator.
 
 ## Boundaries

@@ -26,5 +26,6 @@ This specification defines how Strata adapts its default workflow to a target Ty
 
 ## Stage commits and workspace
 - Run against the repository and branch selected by the user. Preserve pre-existing unrelated workspace changes.
+- Treat coordinator-planned stage paths as the primary focus, not a hard allowlist. Agents may modify directly related source, tests, project configuration, manifests, lockfiles, and integration files needed for the stage. Record their changed paths, let the Stage Coordinator assess relevance, and include accepted stage changes in the stage checkpoint. Keep Strata metadata, run records, specifications, memory, and unrelated user changes protected.
 - After the Stage Coordinator determines a stage is complete and its configured checks pass, commit that stage's changes in the target repository.
 - If checks or commit fail, retain the run as incomplete and resumable, with the failure evidence and current stage context.
