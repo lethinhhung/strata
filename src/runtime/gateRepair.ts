@@ -5,7 +5,7 @@ import { agentStep } from './agentStep.js';
 import { canEditProjectPath } from './editPolicy.js';
 
 export async function repairGate(repo: string, record: any, stage: any, config: any, file: string,
-  context: string, role: string, gate: string, findings: unknown, task = '') {
+  context: string, role: string, gate: string, findings: unknown, task = '', memoryHandoff = '') {
   const agent = role === 'implementation' ? 'Implement Agent' : role === 'tests' ? 'Test Agent' : role;
   const phase = role === 'implementation' ? 'implement_repair' : role === 'tests' ? 'test_repair' : `repair_${role.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
   const subtype: 'implement' | 'test' | 'custom' = role === 'implementation' ? 'implement' : role === 'tests' ? 'test' : 'custom';
@@ -17,7 +17,7 @@ export async function repairGate(repo: string, record: any, stage: any, config: 
     : 'Report the repair and any remaining findings before handing off.';
   const result = await agentStep(record, file, subtype, stage.id, () => utils.askScoped(config, agent, {
     repo,
-    text: `Repair the ${gate} issue (repair ${attempt}) using the findings and evidence below. The assigned edit agent may change any task-relevant project files; the original stage scope is context, not a file ownership boundary or repair limit. Preserve unrelated work, specs, memory, and run records. Fix the underlying cause; never weaken a test or hide a production defect. ${verifyInstruction}\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nROUTED TASK:\n${task}\nGATE FINDINGS:\n${utils.json(findings)}`,
+    text: `Repair the ${gate} issue (repair ${attempt}) using the findings and evidence below. The assigned edit agent may change any task-relevant project files; the original stage scope is context, not a file ownership boundary or repair limit. Preserve unrelated work, specs, memory, and run records. Fix the underlying cause; never weaken a test or hide a production defect. ${verifyInstruction}\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nRELEVANT MEMORY HANDOFF:\n${memoryHandoff || 'No relevant memory identified.'}\nROUTED TASK:\n${task}\nGATE FINDINGS:\n${utils.json(findings)}`,
   }, context, {
     allowedPath: (target: string) => canEditProjectPath(target, repo, record, file),
   }), role);

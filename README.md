@@ -61,6 +61,14 @@ strata status RUN_ID
 strata resume RUN_ID --repo .
 ```
 
+After reviewing a successful run, archive durable engineering memory separately:
+
+```sh
+strata archive RUN_ID --repo .
+```
+
+Run and resume never write memory automatically. The Archivist writes concise entries to `decisions.md`, `notes.md`, and `progress.md` under `workflow.memory_path`, following the repository's memory README when present.
+
 `--review-plan` saves the decomposed plan in the run record and stops before implementation. Inspect or edit that record with `strata status RUN_ID`, then continue with `strata resume RUN_ID --repo .`.
 
 Run records are saved under `docs/temps/` with the stage plan, role handoffs, check evidence, repair history, push results, unresolved findings, and checkpoints. Completed stages are skipped on resume when their checkpoint commits remain available.

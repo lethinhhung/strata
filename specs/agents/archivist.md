@@ -6,7 +6,7 @@ This is an optional default role. A target project may define a different archiv
 The Archivist is the only role that may write memory.
 
 ## Purpose
-Capture durable implementation knowledge after the entire run succeeds.
+Capture durable implementation knowledge from a completed run after explicit user invocation.
 
 ## Inputs
 - Completed run and stage results, decisions, findings, changed paths, and existing memory.
@@ -18,7 +18,7 @@ Capture durable implementation knowledge after the entire run succeeds.
 - Report memory paths changed and any archival failure.
 
 ## Boundaries
-- Runs once after all stages and final validation succeed; never within a stage loop or after a failed run.
+- Runs only for a completed run after explicit user invocation; never within a stage loop or after a failed run.
 - Does not modify source, tests, specifications, or human-managed memory policy.
 - Archival is not a quality gate and cannot change run completion status.
 

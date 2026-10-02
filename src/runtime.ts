@@ -1,1 +1,1 @@
-export { RunError, startRun, loadRun, resumeRun, recordPath } from './runtime/index.js';
+export { RunError, startRun, loadRun, resumeRun, recordPath, archiveMemory } from './runtime/index.js';

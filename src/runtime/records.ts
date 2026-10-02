@@ -20,7 +20,7 @@ export interface Stage {
 }
 export interface Attempt { stage_id: string; number: number; passed: boolean; reason: string; findings: any[]; at: string }
 export interface Event { type: 'repair' | 'final_repair'; stage_id: string; attempt?: number; details: any[]; at: string }
-export interface ArchivistResult { status: 'complete'; entries: number; path: string }
+export interface ArchivistResult { status: 'complete'; entries: number; path?: string }
 export interface Config {
   worker: any; strong: any;
   workflow: Workflow;

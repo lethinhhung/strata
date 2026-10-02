@@ -14,7 +14,7 @@ Default: Codex. A project may select another configured provider and model.
 - Agent findings and handoffs, changed paths, configured check output, prior repairs, and current run state.
 
 ## Responsibilities
-- Give the implementer one concrete stage task and supply useful handoffs for review, testing, and validation.
+- Select only memory entries relevant to the stage and return them in `memory_handoff`; supply one concrete implementation task and useful review, test, and validation handoffs.
 - Interpret repair evidence and recommend a concrete role and action; Strata owns the cycle count and continuation decision.
 - Ask agents to run relevant checks as part of fixing issues; Strata reruns configured project checks to capture authoritative results.
 - Surface concrete blockers, missing user decisions, or external dependencies.
@@ -28,4 +28,4 @@ Default: Codex. A project may select another configured provider and model.
 - Does not override Strata's bounded repair policy or checkpoint behavior.
 
 ## Handoff
-Return the implementation task, review focus, test task, validation requirements, and relevant prior findings and repairs. Strata records the gate results and creates the stage checkpoint.
+Return the implementation task, review focus, test task, validation requirements, relevant memory handoff, and prior findings and repairs. Strata records the handoff and gate results, supplies the relevant memory to each worker, and creates the stage checkpoint.

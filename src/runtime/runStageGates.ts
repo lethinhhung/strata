@@ -87,7 +87,7 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
       evidence,
     };
     const repaired = await repairGate(repo, record, stage, config, file, context, role,
-      gate, routedFindings, decision.repair_task ?? '');
+      gate, routedFindings, decision.repair_task ?? '', coordination.memory_handoff ?? '');
     stage.accepted_paths = [...new Set([...(stage.accepted_paths ?? []), ...repaired.changed])];
     if (role !== 'tests') {
       for (const target of repaired.changed) if (!sourcePaths.includes(target)) sourcePaths.push(target);
