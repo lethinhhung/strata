@@ -16,5 +16,7 @@ export async function agentStep<T>(record: any, file: string, subtype: AgentSubt
   } finally {
     entry.duration_ms = performance.now() - started;
     save(record, file);
+    const listener = record.onProgress as ((progress: ProgressEntry) => void) | undefined;
+    listener?.({ ...entry });
   }
 }

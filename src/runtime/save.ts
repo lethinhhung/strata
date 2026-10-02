@@ -39,7 +39,7 @@ const defaultRecord: Partial<RunRecord> = {
   const listener = record.onProgress as ((entry: any) => void) | undefined;
   const sent = (record.progress_sent as number | undefined) ?? 0;
   if (listener && emitProgress) {
-    for (const entry of record.progress.slice(sent)) listener(entry);
+    for (const entry of record.progress.slice(sent)) listener({ ...entry });
     Object.defineProperty(record, 'progress_sent', { value: record.progress.length, writable: true, configurable: true });
   }
 }

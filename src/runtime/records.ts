@@ -5,6 +5,7 @@ export interface Stage {
   id: string;
   title: string;
   concern: string;
+  accepted_paths?: string[];
   dependencies: string[];
   completion_criteria: string[];
   checkpoint: string;

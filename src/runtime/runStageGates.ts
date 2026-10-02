@@ -1,5 +1,4 @@
 import * as utils from './utils.js';
-import * as helpers from './helpers.js';
 import { repairGate } from './gateRepair.js';
 import { reviewStage } from './gateReview.js';
 import { createTests } from './gateTests.js';
@@ -55,12 +54,12 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
     const limit = config.workflow[limitKey] ?? 3;
     if (repairCount >= limit) {
       const openIssues = [
-        ...(review.review.findings ?? []).filter((finding: any) => review.passed === false).map((finding: any) => `Review: ${typeof finding === 'string' ? finding : JSON.stringify(finding)}`),
+        ...(review.review.findings ?? []).filter(() => review.passed === false).map((finding: any) => `Review: ${typeof finding === 'string' ? finding : JSON.stringify(finding)}`),
         ...(!review.passed && !(review.review.findings ?? []).length ? ['Review did not pass; no actionable finding was returned.'] : []),
         ...(testFailed ? (testAgent.result.findings ?? []).map((finding: any) => `Test agent: ${typeof finding === 'string' ? finding : JSON.stringify(finding)}`) : []),
         ...(testAgent.violations.length ? [`Test agent attempted protected paths: ${testAgent.violations.join(', ')}`] : []),
         ...failedChecks.map((check: any) => `Check ${check.id} failed: ${(check.stderr || check.stdout || check.error || 'non-zero exit').slice(-1000)}`),
-        ...(validation.validation.findings ?? []).filter((finding: any) => validation.passed === false).map((finding: any) => `Validation: ${typeof finding === 'string' ? finding : JSON.stringify(finding)}`),
+        ...(validation.validation.findings ?? []).filter(() => validation.passed === false).map((finding: any) => `Validation: ${typeof finding === 'string' ? finding : JSON.stringify(finding)}`),
         ...(!validation.passed && !(validation.validation.findings ?? []).length ? ['Validation did not pass; no actionable finding was returned.'] : []),
       ].filter(Boolean);
       stage.open_issues = [...new Set(openIssues)];
