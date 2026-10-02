@@ -62,6 +62,8 @@ const defaultRecord: Partial<RunRecord> = {
       return;
     }
     if (result.blocked) break;
+    // max_repairs counts retries after the initial stage pass.
+    if (attemptIndex > (config.workflow.max_repairs ?? 2)) break;
     const signature = utils.json({ reason: result.reason, findings: result.findings });
     record.events.push({ type: 'repair', stage_id: stage.id, attempt: attemptIndex, details: result.findings, at: utils.now() });
     repairContext = utils.json({

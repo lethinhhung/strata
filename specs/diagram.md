@@ -8,31 +8,26 @@ flowchart TD
     CLI --> COORD[Coordinator<br/>Default provider: Codex]
     COORD --> PLAN[Inspect project and epic<br/>Plan stages and acceptance criteria]
     PLAN --> STAGE[Stage Coordinator<br/>Default provider: Codex]
-    STAGE --> DELEGATE[Choose project-defined roles and sequence]
-    DELEGATE --> AGENTS[Agents<br/>Default provider: OpenCode]
-    AGENTS --> REPORT[Pass findings, changes, check results,<br/>and prior repairs back to Stage Coordinator]
-    REPORT --> DECIDE{Stage Coordinator decides next action}
-    DECIDE -->|Needs work| DELEGATE
-    DECIDE -->|Ready for project checks| CHECKS[Run target project's configured<br/>tests, lint, typecheck, build, etc.]
-    CHECKS --> PASS{Configured checks pass?}
-    PASS -->|No| REPAIR[Route failure evidence and repair history<br/>to the relevant project agent]
-    REPAIR --> AGENTS
-    PASS -->|Yes| COMPLETE{Stage Coordinator marks stage complete?}
-    COMPLETE -->|No; more work| DELEGATE
-    COMPLETE -->|Yes| COMMIT[Commit completed stage in target repo]
+    STAGE --> BUILD[Implement stage<br/>Default provider: OpenCode]
+    BUILD --> GATES[Review + test authoring in parallel<br/>Default provider: OpenCode]
+    GATES --> CHECKS[Run configured checks once<br/>after test authoring]
+    CHECKS --> VALIDATE[Validate supplied evidence<br/>Default provider: OpenCode]
+    VALIDATE --> PASS{Gates pass or reach repair cap?}
+    PASS -->|Repair needed| REPAIR[Route findings directly<br/>to an edit-capable worker]
+    REPAIR --> GATES
+    PASS -->|Ready / cap reached| COMMIT[Commit completed stage<br/>record unresolved findings]
     COMMIT --> COMMITOK{Commit succeeds?}
     COMMITOK -->|No| RESUME[Keep stage incomplete and resumable]
     COMMITOK -->|Yes| NEXT{Stages remain?}
     NEXT -->|Yes| STAGE
-    NEXT -->|No| FINAL[Coordinator integrates stages and checks epic criteria]
-    FINAL -->|Needs fixes| STAGE
-    FINAL -->|Complete| DONE[Record successful run]
+    NEXT -->|No| DONE[Record successful run]
 ```
 
 ## Workflow invariants
-- Strata coordinates providers, context, state, configured project checks, and stage commits. It does not impose universal agent-quality gates or worker ordering.
-- The Coordinator plans and integrates; a Stage Coordinator owns each stage; agents perform project-defined tasks.
+- Strata coordinates providers, context, state, configured project checks, bounded stage gates, and stage commits.
+- The Coordinator plans; a Stage Coordinator prepares each stage handoff; agents perform project-defined tasks.
 - Project-defined role instructions and applicable automated checks are loaded from the target repository.
-- Failed checks return to the Stage Coordinator with their output and prior repair history; the workflow continues through agent-directed repair until resolved or a concrete blocker is reported.
-- Each completed stage is committed in the selected target repository. Failed checks or commits keep the stage incomplete and resumable.
+- Review and test authoring run in parallel after implementation when their write scopes do not overlap; otherwise test authoring precedes review. Configured commands run once after authoring, then validation assesses the recorded evidence.
+- Failed gates go directly to the relevant worker with findings and prior repair history. After a repair changes files, Strata reruns configured checks and affected review gates; exhausted limits are recorded as unresolved findings.
+- Each completed stage is committed in the selected target repository. Commit failures keep the stage incomplete and resumable.
 - Provider choice is per role. Current defaults are Codex for coordinators and OpenCode for agents.

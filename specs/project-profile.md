@@ -21,11 +21,11 @@ This specification defines how Strata adapts its default workflow to a target Ty
 ## Target project checks
 - Check commands come from the target project's explicit Strata configuration or project instructions, and are evaluated relative to the target repository. For Node.js repositories, Strata also discovers standard scripts in the target `package.json` (`test:ci` or `test`, plus `lint`, `typecheck`, and `build`) when no explicit check list replaces discovery. The package manager is selected from the repository lockfile.
 - Run applicable checks the project defines or exposes as standard scripts. Do not invent missing scripts or impose checks absent from the project.
-- Return check command, exit status, and relevant output to the Stage Coordinator and the assigned agent. A failed check enters the project's agent-directed repair loop.
+- Return check command, exit status, and relevant output to the run record and assigned repair agent. A failed check enters Strata's bounded gate repair loop.
 - Record which checks were configured, which ran, and why any configured check did not run. Never report a skipped configured check as passed.
 
 ## Stage commits and workspace
 - Run against the repository and branch selected by the user. Preserve pre-existing unrelated workspace changes.
-- Treat coordinator-planned stage paths as the primary focus, not a hard allowlist. Agents may modify directly related source, tests, project configuration, manifests, lockfiles, and integration files needed for the stage. Record their changed paths, let the Stage Coordinator assess relevance, and include accepted stage changes in the stage checkpoint. Keep Strata metadata, run records, specifications, memory, and unrelated user changes protected.
-- After the Stage Coordinator determines a stage is complete and its configured checks pass, commit that stage's changes in the target repository.
+- Treat coordinator-planned stage paths as the primary focus, not a hard allowlist. Agents may modify directly related source, tests, project configuration, manifests, lockfiles, and integration files needed for the stage. Record changed paths, assess relevance in review and validation, and include accepted stage changes in the checkpoint. Keep Strata metadata, run records, specifications, memory, and unrelated user changes protected.
+- After stage gates complete or reach their configured repair cap, commit the stage's changes and record unresolved findings in the target repository.
 - If checks or commit fail, retain the run as incomplete and resumable, with the failure evidence and current stage context.

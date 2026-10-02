@@ -30,21 +30,21 @@ Strata owns orchestration mechanics and stage gates. Coordinators plan and prepa
 - The target repository is authoritative for its conventions, acceptance criteria, available checks, and role customizations.
 - A project may provide its own definitions for the Coordinator, Stage Coordinator, and any agents. A project definition overrides Strata's default for that role; Strata defaults fill only roles the project has not defined.
 - Role definitions are independent: each states its purpose, provider/model selection, inputs, responsibilities, boundaries, handoff format, and project-specific expectations.
-- The pipeline is fixed: implementation → review → test → validation. Project role instructions may specialize the work but cannot skip a pipeline step.
+- The pipeline is fixed: implementation, then review and test authoring in parallel, then configured checks and validation. Project role instructions may specialize the work but cannot skip a pipeline step.
 - Project role instructions cannot disable stage checkpoints, bounded repair cycles, configured checks, or push attempts.
 - See [project profile and provider resolution](project-profile.md).
 
 ## 6. Workflow and Context
 - The Coordinator inspects the epic and repository, loads applicable project instructions, and produces a stage plan with objectives, dependencies, completion criteria, checkpoint identities, and `logic` or `ui` kind.
-- Every stage runs implementation → review → test → validation. The Stage Coordinator supplies implementation instructions and handoff criteria; it cannot skip a specialist step.
+- Every stage runs implementation, then review and test authoring in parallel when their write scopes do not overlap (otherwise test authoring precedes review), configured checks, and validation. The Stage Coordinator supplies implementation instructions and handoff criteria; it cannot skip a specialist step.
 - Strata passes findings, decisions, changed paths, check outcomes, and prior repair attempts between roles. Agents must receive enough context to continue work without repeating failed approaches.
 - Review, test, validation, and configured-check failures are sent through bounded repair cycles. Reaching a configured limit records open findings and permits the stage commit; concrete blockers halt the run.
 - Work runs in the repository selected by `--repo`, on its current branch or a branch chosen by `--branch`; the default branch is refused. The worktree must be clean apart from Strata config and the epic input.
 - Resumption restores the plan, stage state, role handoffs, and prior evidence. Completed stages are not repeated when their recorded commits remain present.
 
 ## 7. Checks, Completion, and Checkpointing
-- Every stage runs implementation, review, test, and validation in order. UI stages use the screen implementer role; logic stages use the standard implementer role.
-- The project's configured automated checks are mechanical requirements. Run every configured test, lint, typecheck, build, or other check that applies to the target project, record the command and result, and return failures to the Stage Coordinator and relevant agents for diagnosis and repair.
+- Every stage runs implementation, review, test, and validation. Review and test authoring run concurrently after implementation when their write scopes do not overlap; otherwise test authoring precedes review. Configured commands run once after authoring, followed by validation. UI stages use the screen implementer role; logic stages use the standard implementer role.
+- The project's configured automated checks are mechanical requirements. Run every configured test, lint, typecheck, build, or other check that applies to the target project once after test authoring, record the command and result, and return failures with their evidence to the relevant repair agent.
 - Strata discovers checks from explicit project configuration or project instructions; it must not invent a requirement for a check the project does not use. A check absent from the project is not a failure.
 - Review, test, validation, and configured-check findings are routed to an edit-capable agent for bounded repair cycles. If the limit is reached, the stage is committed with unresolved findings recorded. A concrete blocker or commit failure halts the run.
 - Repair limits are configured per gate and default to three cycles. A limit does not erase the finding: it is recorded in the stage report and surfaced in the run outcome.

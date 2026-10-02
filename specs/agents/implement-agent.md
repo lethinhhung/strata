@@ -15,7 +15,7 @@ Implement or repair source changes for one assigned stage task.
 - Use planned stage scope as the primary focus, not a hard file boundary. Make necessary, directly related project configuration, package manifest, lockfile, and integration changes when required by the objective. Preserve unrelated files. For gate repairs, choose relevant project files beyond the original stage scope as needed to resolve supplied findings.
 - Surface ambiguity, risks, and incomplete work explicitly.
 - When called for gate repair, address the supplied findings directly and report which finding each edit resolves.
-- When assigned a repair, run the relevant failing check after each fix and continue the fix-and-rerun loop until it passes or the Stage Coordinator identifies a concrete blocker. Report commands and outcomes; Strata reruns configured project checks to record results.
+- When assigned a repair, use recorded check output to fix the cause. Do not rerun configured checks; Strata reruns them after a repair changes files. For non-configured checks, run only the narrowest relevant command when needed.
 - Read prior repair outcomes included with the current failure and avoid repeating an approach that did not change the failing evidence.
 
 ## Boundaries

@@ -10,12 +10,12 @@ Provide a read-only assessment of stage coverage and project-defined checks usin
 - Review findings, test results, diff, and configured repository checks.
 
 ## Responsibilities
-- Assess requirement coverage and applicable project checks under the target project's conventions.
-- Report commands, observations, remaining concerns, and evidence to the Stage Coordinator.
+- Assess requirement coverage and applicable project checks under the target project's conventions. Do not rerun commands; Strata supplies recorded engine evidence.
+- Report observations, remaining concerns, and supplied command evidence to Strata.
 
 ## Boundaries
 - Read-only by default; a project may assign follow-up work through a separate role or explicitly broaden this role.
 - Does not misrepresent missing or unavailable evidence as a successful check.
 
 ## Output
-Structured assessment with check results, commands, outcomes, uncovered requirements, and blockers. The Stage Coordinator decides next steps.
+Structured assessment with check results, commands, outcomes, uncovered requirements, and blockers.

@@ -3,7 +3,7 @@
 This is Strata's default stage-level coordinator role. A target project may provide an independent definition that overrides it.
 
 ## Purpose
-Prepare the implementation task, review focus, test task, and validation requirements for one stage. Strata runs the fixed pipeline and owns its bounded repair loop.
+Prepare the implementation task, review focus, test task, and validation requirements for one stage. Strata runs review and test authoring together after implementation when their write scopes do not overlap, then configured checks and validation; it owns the bounded repair loop.
 
 ## Provider
 Default: Codex. A project may select another configured provider and model.
@@ -15,15 +15,15 @@ Default: Codex. A project may select another configured provider and model.
 
 ## Responsibilities
 - Select only memory entries relevant to the stage and return them in `memory_handoff`; supply one concrete implementation task and useful review, test, and validation handoffs.
-- Interpret repair evidence and recommend a concrete role and action; Strata owns the cycle count and continuation decision.
-- Ask agents to run relevant checks as part of fixing issues; Strata reruns configured project checks to capture authoritative results.
+- Give each specialist a focused handoff. Strata routes reported gate failures to an edit-capable worker and owns the cycle count and continuation decision.
+- Do not ask agents to rerun configured checks; Strata executes them and records authoritative results after test authoring and after repairs that change files.
 - Surface concrete blockers, missing user decisions, or external dependencies.
 - Treat planned stage scope as a focus guide. Authorize tightly related project configuration, package manifests, lockfiles, and integration files when required by the objective, and ensure the final review accounts for every changed path.
-- Return a concise stage report describing completed work, decisions, check evidence, commit, remaining issues, and any blockers.
+- Return concise task handoffs, relevant decisions, and any blockers known before implementation.
 
 ## Boundaries
 - Does not directly implement assigned feature work unless the project's own role definition explicitly combines coordination and implementation.
-- Does not skip or reorder the implementation, review, test, and validation steps.
+- Does not skip the implementation, review, test, or validation steps.
 - Does not claim configured checks passed without their recorded command results.
 - Does not override Strata's bounded repair policy or checkpoint behavior.
 
