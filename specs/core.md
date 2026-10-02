@@ -24,7 +24,7 @@ Strata owns orchestration mechanics and stage gates. Coordinators plan and prepa
 - **Coordinator:** Run-level planning role. Creates the stage plan. The default provider is Codex. See [Coordinator role](agents/epic-coordinator.md).
 - **Stage Coordinator:** Prepares one stage's task handoff and review criteria. The runtime owns the fixed specialist sequence and gate loop. The default provider is Codex. See [Stage Coordinator role](agents/stage-coordinator.md).
 - **Agents:** Project-defined roles that perform exploration, implementation, review, testing, validation, or other project-specific work. Their definitions can add, remove, or combine roles to suit the project. The default provider is OpenCode. See [agent role specs](agents/).
-- Memory is read as advisory planning context. Successful runs never archive memory inline; after reviewing a successful run, the user may explicitly invoke `strata archive RUN_ID` to ask the Archivist to propose durable updates.
+- Memory is read as advisory planning context. After each successful stage checkpoint, Strata invokes the Archivist to record durable stage knowledge for following stages. Archival failures are recorded and do not fail the stage.
 
 ## 5. Project and Role Definitions
 - The target repository is authoritative for its conventions, acceptance criteria, available checks, and role customizations.
@@ -52,8 +52,8 @@ Strata owns orchestration mechanics and stage gates. Coordinators plan and prepa
 - Commit only the completed stage's changes, with an identifiable stage/checkpoint message. A commit failure leaves the stage incomplete and resumable.
 
 ## 8. Run Completion and Memory
-- The run completes after every planned stage has reached its commit checkpoint. No pull request is opened and no memory archive is written as part of the run.
-- `strata archive RUN_ID` is a separate, explicit post-review action. It accepts only a completed run, invokes the Archivist with the worker provider, and writes only validated decision, note, and progress entries under the configured memory directory. Archival does not change run status or gate results.
+- The run completes after every planned stage has reached its commit checkpoint. No pull request is opened.
+- After each completed stage checkpoint, Strata invokes the Archivist with that stage's results and writes validated decision, note, and progress entries under the configured memory directory. Writes are serialized before the next stage starts, so later stages can consult them. Archival is not a gate; failures are recorded and retried when resuming. `strata archive RUN_ID` remains available to archive a previously completed run or retry archival manually.
 
 ## 9. Providers and Runtime
 - Provider integrations are adapters. Role definitions select a provider and model independently, allowing different providers for coordinators and agents and future provider additions without changing orchestration policy.

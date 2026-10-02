@@ -70,7 +70,6 @@ async function main(): Promise<number> {
       reporter.finish();
     }
     console.log(formatOutcome('run', record, recordPath(repo, record.run_id)));
-    if (record.status === 'complete' && !record.archival) console.log(`After reviewing, archive durable memory with: strata archive ${record.run_id} --repo ${repo}`);
     return record.status === 'complete' || record.status === 'planned' ? 0 : 1;
   }
   if (command === 'resume') {
@@ -84,7 +83,6 @@ async function main(): Promise<number> {
       reporter.finish();
     }
     console.log(formatOutcome('resume', record, file));
-    if (record.status === 'complete' && !record.archival) console.log(`After reviewing, archive durable memory with: strata archive ${record.run_id} --repo ${repo}`);
     return record.status === 'complete' ? 0 : 1;
   }
   if (command === 'archive') {

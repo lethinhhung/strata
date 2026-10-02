@@ -1,6 +1,8 @@
 import { RunError, RunRecord } from './types.js';
 import * as utils from './utils.js';
 import { runStageWithRepairs } from './runStageWithRepairs.js';
+import { archiveStageMemory } from './stageMemory.js';
+import { checkpoint } from './checkpoint.js';
 
 export async function executeRun(repo: string, record: any, config: any, file: string) {
   // Ensure record has all required fields
@@ -35,7 +37,12 @@ const defaultRecord: Partial<RunRecord> = {
   record.status = 'running';
   utils.save(record, file);
   for (const stage of record.stages) {
-    if (stage.status === 'complete' && hasCheckpoint(repo, stage, config)) continue;
+    if (stage.status === 'complete' && hasCheckpoint(repo, stage, config)) {
+      const archivalPending = stage.archival?.status !== 'complete';
+      await archiveStageMemory(repo, record, stage, config, file);
+      if (archivalPending && stage.archival?.status === 'complete') checkpoint(repo, stage, config, record, file, 0);
+      continue;
+    }
     if (stage.status === 'complete') stage.status = 'pending';
     if (stage.dependencies.some((id: string) => record.stages.find((item: any) => item.id === id)?.status !== 'complete')) {
       record.progress.push({ type: 'run', subtype: 'fail', timestamp: utils.now() });

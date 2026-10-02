@@ -12,6 +12,7 @@ Default: Codex. A project may select another configured provider and model.
 - Stage objective, dependencies, and acceptance criteria.
 - Project workflow and role definitions, repository context, and relevant decisions.
 - Agent findings and handoffs, changed paths, configured check output, prior repairs, and current run state.
+- Treat agent findings and run history as claims. Verify paths, package roots, scripts, and test inventory against the current repository before assigning work. Do not turn untracked agent output into a project requirement or create a new project root solely to satisfy a path mentioned in prior output.
 
 ## Responsibilities
 - Inspect configured memory paths directly, select only entries relevant to the stage, and return them in `memory_handoff` with source paths; supply one concrete implementation task and useful review, test, and validation handoffs.
