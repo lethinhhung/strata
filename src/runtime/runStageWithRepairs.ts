@@ -2,6 +2,7 @@ import * as utils from './utils.js';
 import { runStage } from './runStage.js';
 import { RunError, RunRecord } from './types.js';
 import { checkpoint } from './checkpoint.js';
+import { archiveStageMemory } from './stageMemory.js';
 
 export async function runStageWithRepairs(repo: string, record: any, stage: any, config: any, file: string, initialFinding: string) {
   // Ensure record has all required fields
@@ -55,6 +56,8 @@ const defaultRecord: Partial<RunRecord> = {
     record.attempts.push(attempt);
     utils.save(record, file);
     if (result.passed) {
+      stage.status = 'complete';
+      await archiveStageMemory(repo, record, stage, config, file);
       checkpoint(repo, stage, config, record, file, attemptIndex, stagedBeforeStage);
       record.progress.push({ type: 'stage', subtype: 'complete', stage_id: stage.id, timestamp: utils.now() });
       if (config.workflow.checkpoint) record.progress.push({ type: 'gate', subtype: 'checkpoint', stage_id: stage.id, timestamp: utils.now(), passed: true });

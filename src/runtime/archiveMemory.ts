@@ -2,13 +2,18 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as utils from './utils.js';
 import { RunError } from './types.js';
+import { agentStep } from './agentStep.js';
 
 type MemoryEntry = { class: 'decision' | 'note' | 'progress'; title: string; content: string };
 
-export async function archiveMemory(repo: string, record: any, config: any, file: string) {
-  if (record.status !== 'complete') throw new RunError(`Cannot archive memory for run ${record.run_id}: status is ${record.status}`);
+export async function archiveMemory(repo: string, record: any, config: any, file: string, stageId?: string) {
+  const stage = stageId ? record.stages.find((item: any) => item.id === stageId) : undefined;
+  if (stageId && !stage) throw new RunError(`Cannot archive memory for run ${record.run_id}: stage ${stageId} was not found`);
+  if (stageId && !['in_progress', 'complete'].includes(stage.status)) throw new RunError(`Cannot archive memory for stage ${stageId}: status is ${stage.status}`);
+  if (!stageId && record.status !== 'complete') throw new RunError(`Cannot archive memory for run ${record.run_id}: status is ${record.status}`);
   if (path.resolve(record.repository) !== path.resolve(repo)) throw new RunError('Run record belongs to a different repository');
-  if (record.archival?.status === 'complete') return record.archival;
+  if (stage?.archival?.status === 'complete') return stage.archival;
+  if (!stageId && record.archival?.status === 'complete') return record.archival;
 
   const memoryDir = path.resolve(repo, config.workflow.memory_path);
   if (!memoryDir.startsWith(`${path.resolve(repo)}${path.sep}`)) throw new RunError('Configured memory path must remain inside the repository');
@@ -22,11 +27,11 @@ export async function archiveMemory(repo: string, record: any, config: any, file
     run_id: record.run_id,
     completed_at: record.completed_at,
     plan: record.plan,
-    stages: (record.stages ?? []).map((stage: any) => ({
-      id: stage.id, title: stage.title, completion_criteria: stage.completion_criteria,
-      accepted_paths: stage.accepted_paths, checkpoint_commit: stage.checkpoint_commit,
-      open_issues: stage.open_issues,
-      phases: (stage.phase_results ?? []).map((phase: any) => ({
+    stages: (stage ? [stage] : record.stages ?? []).map((item: any) => ({
+      id: item.id, title: item.title, completion_criteria: item.completion_criteria,
+      accepted_paths: item.accepted_paths, checkpoint_commit: item.checkpoint_commit,
+      open_issues: item.open_issues,
+      phases: (item.phase_results ?? []).map((phase: any) => ({
         phase: phase.phase,
         status: phase.result?.status,
         summary: phase.result?.summary,
@@ -36,11 +41,12 @@ export async function archiveMemory(repo: string, record: any, config: any, file
       })),
     })),
   };
-  const result = await utils.askReadOnly(config, 'Archivist', {
+  const archivalAction = () => utils.askReadOnly(config, 'Archivist', {
     repo,
     shape: '{"entries":[{"class":"decision|note|progress","title":"short title","content":"entry body in repository format"}]}',
-    text: `The user explicitly requested memory archival after reviewing this successful run. Read the repository memory README and existing entries directly from these paths, then propose concise reusable knowledge only: ${utils.json(memoryPaths)}. Follow the existing format for decisions.md, notes.md, and progress.md; include required affected paths and originating run link in decisions/notes. Preserve current files and let the runner append your entries. Do not write to source, specifications, tests, or policy. Do not record secrets, credentials, private user content, or raw application data. Return an empty entries array when there is no durable knowledge.\nRUN SUMMARY:\n${utils.json(runSummary)}`,
+    text: `${stage ? 'Archive durable knowledge from this successfully completed stage so later stages can use it.' : 'Archive durable knowledge from this completed run.'} Read the repository memory README and existing entries directly from these paths, then propose concise reusable knowledge only: ${utils.json(memoryPaths)}. Follow the existing format for decisions.md, notes.md, and progress.md; include required affected paths and originating run link in decisions/notes. Preserve current files and let the runner append your entries. Do not write to source, specifications, tests, or policy. Do not record secrets, credentials, private user content, or raw application data. Return an empty entries array when there is no durable knowledge.\nRUN SUMMARY:\n${utils.json(runSummary)}`,
   }, utils.phaseContext(repo, config));
+  const result = stage ? await agentStep(record, file, 'archive', stage.id, archivalAction, 'Archivist') : await archivalAction();
 
   const entries = (Array.isArray(result.entries) ? result.entries.slice(0, 12) : []) as MemoryEntry[];
   const files = new Map<string, string[]>();
@@ -71,7 +77,11 @@ export async function archiveMemory(repo: string, record: any, config: any, file
     }
   }
   const archival = { status: 'complete' as const, entries: writtenEntries, ...(written.length ? { path: written.join(', ') } : {}) };
-  record.archival = archival;
+  if (stage) {
+    stage.archival = archival;
+    stage.accepted_paths = [...new Set([...(stage.accepted_paths ?? []), ...written])];
+  }
+  else record.archival = archival;
   utils.save(record, file);
   return archival;
 }
