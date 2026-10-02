@@ -24,6 +24,13 @@ export function validatePlan(plan: any) {
     }
     seen.add(stage.id);
     checkpoints.add(stage.checkpoint);
-    return { ...stage, status: 'pending', phase_results: [], checkpoint_commit: null };
+    const kind = stage.kind === 'ui' || stage.kind === 'logic' ? stage.kind : inferKind(stage);
+    return { ...stage, kind, mechanical: stage.mechanical === true, status: 'pending', phase_results: [], checkpoint_commit: null };
   });
+}
+
+function inferKind(stage: any): 'ui' | 'logic' {
+  return /\b(screen|ui|component|navigation|admin page|expo|native|web page|paywall|onboarding|landing|form)\b/i
+    .test(`${stage.title ?? ''} ${stage.concern ?? ''} ${(stage.scope ?? []).join(' ')} ${(stage.completion_criteria ?? []).join(' ')}`)
+    ? 'ui' : 'logic';
 }

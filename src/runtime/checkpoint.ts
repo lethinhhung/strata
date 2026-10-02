@@ -47,14 +47,42 @@ const defaultRecord: Partial<RunRecord> = {
       if (staged.length) throw new RunError(`Checkpoint for ${stage.id} refuses pre-staged in-scope paths: ${staged.join(', ')}`);
       const add = utils.git(repo, ['add', '-A', '--', ...eligible], { allowFailure: true });
       if (add.status !== 0) throw new RunError(add.stderr.trim());
-      const message = `${config.workflow.checkpoint_prefix}: ${stage.id} ${stage.title} [${stage.checkpoint}]${attempt > 1 ? ` repair-${attempt}` : ''}`;
+      const ordinal = Math.max(1, record.stages.findIndex((item: any) => item.id === stage.id) + 1);
+      const message = `stage-${ordinal}: ${stage.title}${attempt > 1 ? ` (fix ${attempt})` : ''}`;
       const commit = utils.git(repo, ['commit', '--only', '-m', message, '--', ...eligible], { allowFailure: true });
       if (commit.status !== 0) throw new RunError(`Checkpoint failed for ${stage.id}: ${commit.stderr.trim()}`);
       stage.checkpoint_commit = utils.git(repo, ['rev-parse', 'HEAD']).stdout.trim();
+      stage.checkpoint_subject = message;
     }
+    const branch = utils.git(repo, ['branch', '--show-current']).stdout.trim();
+    const pushed = pushCheckpoint(repo, branch);
+    const ordinal = Math.max(1, record.stages.findIndex((item: any) => item.id === stage.id) + 1);
+    const stageCommit = utils.git(repo, ['log', '--format=%H', `--grep=^stage-${ordinal}:`, '-1'], { allowFailure: true });
+    if (stageCommit.status === 0 && stageCommit.stdout.trim()) stage.checkpoint_commit = stageCommit.stdout.trim();
+    stage.pushed = pushed.passed;
+    stage.push_evidence = pushed.message;
+    record.progress.push({ type: 'gate', subtype: 'push', stage_id: stage.id, timestamp: utils.now(), passed: pushed.passed });
   }
   stage.status = 'complete';
   delete stage.failure;
   stage.completed_at = utils.now();
   utils.save(record, file);
+}
+
+function pushCheckpoint(repo: string, branch: string) {
+  let last = '';
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const push = utils.git(repo, ['push', 'origin', branch], { allowFailure: true });
+    if (push.status === 0) return { passed: true, message: `Pushed ${branch} on attempt ${attempt}` };
+    last = (push.stderr || push.stdout).trim();
+    if (attempt === 5) break;
+    const rebase = utils.git(repo, ['pull', '--rebase', 'origin', branch], { allowFailure: true });
+    if (rebase.status !== 0) {
+      last = `${last}\nPull --rebase failed: ${(rebase.stderr || rebase.stdout).trim()}`;
+      break;
+    }
+    // The source workflow waits between retries to avoid hammering the remote.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30_000);
+  }
+  return { passed: false, message: last || 'Push failed' };
 }

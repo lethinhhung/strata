@@ -94,7 +94,13 @@ function formatElapsed(milliseconds: number): string {
 }
 
 export function formatOutcome(action: 'run' | 'resume', record: { run_id: string; status: string }, reference: string) {
-  return `${action} ${record.run_id}: ${record.status} — ${reference}`;
+  const detailed = record as typeof record & { stages?: Array<{ checkpoint_commit?: string; pushed?: boolean; open_issues?: string[] }> };
+  const stages = detailed.stages ?? [];
+  const committed = stages.filter((stage) => stage.checkpoint_commit).length;
+  const pushed = stages.filter((stage) => stage.pushed).length;
+  const openIssues = stages.reduce((sum, stage) => sum + (stage.open_issues?.length ?? 0), 0);
+  const caveats = [committed ? `stages committed ${committed}/${stages.length}, pushed ${pushed}/${committed}` : '', openIssues ? `${openIssues} unresolved gate finding(s)` : ''].filter(Boolean);
+  return `${action} ${record.run_id}: ${record.status}${caveats.length ? ` — ${caveats.join('; ')}` : ''} — ${reference}`;
 }
 
 export function formatFailure(error: unknown) {

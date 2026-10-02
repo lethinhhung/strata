@@ -14,8 +14,8 @@ const usage = `Strata — specification-led feature implementation runtime
 
 Usage:
   strata init [--repo DIR] [--force]
-  strata run EPIC [--repo DIR] [--config FILE]
-  strata run --prompt TEXT [--repo DIR] [--config FILE]
+  strata run EPIC [--repo DIR] [--config FILE] [--branch NAME] [--review-plan]
+  strata run --prompt TEXT [--repo DIR] [--config FILE] [--branch NAME] [--review-plan]
   strata resume RUN_ID_OR_FILE [--repo DIR] [--config FILE]
   strata status [RUN_ID_OR_FILE] [--repo DIR]
   strata config-example
@@ -64,12 +64,12 @@ async function main(): Promise<number> {
     const reporter = createProgressReporter();
     let record: RunRecord;
     try {
-      record = await startRun(repo, positional[1] ?? '', config, reporter.print, inlinePrompt);
+      record = await startRun(repo, positional[1] ?? '', config, reporter.print, inlinePrompt, typeof options.branch === 'string' ? options.branch : undefined, options.reviewPlan === true);
     } finally {
       reporter.finish();
     }
     console.log(formatOutcome('run', record, recordPath(repo, record.run_id)));
-    return record.status === 'complete' ? 0 : 1;
+    return record.status === 'complete' || record.status === 'planned' ? 0 : 1;
   }
   if (command === 'resume') {
     if (!positional[1]) throw new Error('resume requires a run id or record path');

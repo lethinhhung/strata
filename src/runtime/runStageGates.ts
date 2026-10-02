@@ -46,10 +46,10 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
     });
 
     const failedChecks = evidence.filter((item: any) => !item.gate_passed);
-    if (!failedChecks.length && decision.decision === 'ready') {
+    if (!failedChecks.length && review.passed && validation.passed && decision.decision === 'ready') {
       return { passed: true, reason: '', findings: { review: review.review, validation: validation.validation, evidence } };
     }
-    if (decision.decision === 'blocked') {
+    if (decision.decision === 'blocked' && !failedChecks.length && review.passed && validation.passed) {
       return {
         passed: false,
         blocked: true,
@@ -60,6 +60,22 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
 
     const role = typeof decision.repair_role === 'string' && decision.repair_role
       ? decision.repair_role : 'implementation';
+    const gate = failedChecks.length ? 'test' : review.passed === false ? 'review' : 'validation';
+    const limitKey = gate === 'test' ? 'test_repair_attempts' : gate === 'review' ? 'review_repair_attempts' : 'validation_repair_attempts';
+    const repairCount = record.events.filter((event: any) => event.type === 'repair' && event.stage_id === stage.id && event.details?.gate === gate).length;
+    const limit = config.workflow[limitKey] ?? 3;
+    if (repairCount >= limit) {
+      const openIssues = [
+        ...(review.review.findings ?? []).filter((finding: any) => review.passed === false).map((finding: any) => `Review: ${typeof finding === 'string' ? finding : JSON.stringify(finding)}`),
+        ...(!review.passed && !(review.review.findings ?? []).length ? ['Review did not pass; no actionable finding was returned.'] : []),
+        ...failedChecks.map((check: any) => `Check ${check.id} failed: ${(check.stderr || check.stdout || check.error || 'non-zero exit').slice(-1000)}`),
+        ...(validation.validation.findings ?? []).filter((finding: any) => validation.passed === false).map((finding: any) => `Validation: ${typeof finding === 'string' ? finding : JSON.stringify(finding)}`),
+        ...(!validation.passed && !(validation.validation.findings ?? []).length ? ['Validation did not pass; no actionable finding was returned.'] : []),
+        decision.rationale ? `Coordinator: ${decision.rationale}` : '',
+      ].filter(Boolean);
+      stage.open_issues = [...new Set(openIssues)];
+      return { passed: true, reason: 'Repair cycle limit reached; committing with unresolved findings recorded', findings: { review: review.review, tester: testAgent.result, validation: validation.validation, evidence, decision, open_issues: stage.open_issues } };
+    }
     const routedFindings = {
       coordinator_rationale: decision.rationale ?? '',
       repair_task: decision.repair_task ?? '',
@@ -71,7 +87,7 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
       evidence,
     };
     const repaired = await repairGate(repo, record, stage, config, file, context, role,
-      failedChecks.length ? 'test' : 'coordinator', routedFindings, decision.repair_task ?? '');
+      gate, routedFindings, decision.repair_task ?? '');
     stage.accepted_paths = [...new Set([...(stage.accepted_paths ?? []), ...repaired.changed])];
     if (role !== 'tests') {
       for (const target of repaired.changed) if (!sourcePaths.includes(target)) sourcePaths.push(target);

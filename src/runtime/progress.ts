@@ -22,7 +22,7 @@ export interface AgentTransition {
 
 export interface GateTransition {
   type: 'gate';
-  subtype: 'review' | 'test' | 'validation' | 'checkpoint';
+  subtype: 'review' | 'test' | 'validation' | 'checkpoint' | 'push';
   stage_id: string;
   timestamp: string;
   passed: boolean;

@@ -19,13 +19,13 @@ Default: Codex. A project may select another configured provider and model.
 - Resolve requirements with the user or make explicit assumptions where appropriate.
 - Make architectural and cross-stage decisions and define a dependency-aware stage plan with stable identities and completion criteria.
 - Delegate each stage to a Stage Coordinator with the full relevant contract and decisions.
-- Review integrated stage reports and decide whether more work is needed to satisfy epic acceptance criteria.
-- When a stage or project check exposes a problem, direct targeted repair through the appropriate Stage Coordinator and pass along the evidence and repair history.
-- Report overall completion only after project-defined acceptance criteria are met, applicable configured checks pass, and each completed stage has a commit.
+- Decompose the epic into ordered, single-concern logic and UI stages. Put logic before UI that consumes it and mark mechanical stages explicitly.
+- Keep each stage independently reviewable with a clear objective, dependencies, scope, completion criteria, and checkpoint identity.
+- Plan completion around the sequential stage pipeline and checkpoints; Strata records unresolved gate findings when bounded repairs are exhausted.
 
 ## Boundaries
 - Does not delegate run-level decisions to worker agents.
-- Does not assume a universal stage sequence, agent roster, review rubric, or repair limit.
+- Does not assume project-specific UI frameworks, test tools, or implementation conventions without checking the repository.
 - Does not write memory unless the project explicitly assigns an archival role.
 - Does not reorder completed stages during resumption without recording the decision and its effect on existing checkpoints.
 

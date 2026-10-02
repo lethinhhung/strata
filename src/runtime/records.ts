@@ -5,6 +5,8 @@ export interface Stage {
   id: string;
   title: string;
   concern: string;
+  kind?: 'ui' | 'logic';
+  mechanical?: boolean;
   scope: (string | string[])[];
   dependencies: string[];
   completion_criteria: string[];
@@ -12,6 +14,9 @@ export interface Stage {
   status: string;
   phase_results: any[];
   failure?: string;
+  pushed?: boolean;
+  push_evidence?: string;
+  open_issues?: string[];
 }
 export interface Attempt { stage_id: string; number: number; passed: boolean; reason: string; findings: any[]; at: string }
 export interface Event { type: 'repair' | 'final_repair'; stage_id: string; attempt?: number; details: any[]; at: string }
