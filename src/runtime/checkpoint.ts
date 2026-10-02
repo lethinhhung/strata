@@ -2,7 +2,7 @@ import * as utils from './utils.js';
 import { RunError, RunRecord } from './types.js';
 import { inScope } from './helpers.js';
 
-export function checkpoint(repo: string, stage: any, config: any, record: any, file: string, attempt: number) {
+export function checkpoint(repo: string, stage: any, config: any, record: any, file: string, attempt: number, stagedAtAttemptStart: string[] = []) {
   // Ensure record has all required fields
   if (!('progress' in record) || !Array.isArray(record.progress)) {
     record.progress = [];
@@ -43,8 +43,9 @@ const defaultRecord: Partial<RunRecord> = {
     if (!eligible.length && !stage.checkpoint_commit) throw new RunError(`No files to checkpoint for stage ${stage.id}`);
     if (eligible.length) {
       const staged = utils.git(repo, ['diff', '--cached', '--name-only', '--', ...eligible]).stdout
-        .split('\n').map((filePath: string) => filePath.trim()).filter(Boolean);
-      if (staged.length) throw new RunError(`Checkpoint for ${stage.id} refuses pre-staged in-scope paths: ${staged.join(', ')}`);
+        .split('\n').map((filePath: string) => filePath.trim()).filter(Boolean)
+        .filter((filePath: string) => stagedAtAttemptStart.includes(filePath));
+      if (staged.length) throw new RunError(`Checkpoint for ${stage.id} refuses paths already staged before this attempt: ${staged.join(', ')}`);
       const add = utils.git(repo, ['add', '-A', '--', ...eligible], { allowFailure: true });
       if (add.status !== 0) throw new RunError(add.stderr.trim());
       const ordinal = Math.max(1, record.stages.findIndex((item: any) => item.id === stage.id) + 1);

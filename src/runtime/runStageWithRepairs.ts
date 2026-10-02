@@ -35,6 +35,8 @@ const defaultRecord: Partial<RunRecord> = {
   let repairContext = initialFinding;
   let attemptIndex = 0;
   let previousFailure = '';
+  const stagedBeforeStage = utils.git(repo, ['diff', '--cached', '--name-only']).stdout
+    .split('\n').map((filePath: string) => filePath.trim()).filter(Boolean);
   while (true) {
     attemptIndex += 1;
     let result: any;
@@ -53,7 +55,7 @@ const defaultRecord: Partial<RunRecord> = {
     record.attempts.push(attempt);
     utils.save(record, file);
     if (result.passed) {
-      checkpoint(repo, stage, config, record, file, attemptIndex);
+      checkpoint(repo, stage, config, record, file, attemptIndex, stagedBeforeStage);
       record.progress.push({ type: 'stage', subtype: 'complete', stage_id: stage.id, timestamp: utils.now() });
       if (config.workflow.checkpoint) record.progress.push({ type: 'gate', subtype: 'checkpoint', stage_id: stage.id, timestamp: utils.now(), passed: true });
       utils.save(record, file);
