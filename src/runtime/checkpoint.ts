@@ -37,7 +37,17 @@ const defaultRecord: Partial<RunRecord> = {
     !filePath.startsWith('specs/') && !filePath.startsWith('docs/temps/') &&
     ((stage.accepted_paths ?? []).includes(filePath) || (stage.test_repair_paths ?? []).includes(filePath)));
   if (config.workflow.checkpoint) {
-    if (!eligible.length && !stage.checkpoint_commit) throw new RunError(`No files to checkpoint for stage ${stage.id}`);
+    const ordinal = Math.max(1, record.stages.findIndex((item: any) => item.id === stage.id) + 1);
+    const message = `stage-${ordinal}: ${stage.title}${attempt > 1 ? ` (fix ${attempt})` : ''}`;
+    if (!eligible.length && !stage.checkpoint_commit) {
+      // A checks-only or already-satisfied stage still needs a durable
+      // checkpoint. --only with no paths creates an empty commit without
+      // including unrelated changes already present in the index.
+      const commit = utils.git(repo, ['commit', '--allow-empty', '--only', '-m', message, '--'], { allowFailure: true });
+      if (commit.status !== 0) throw new RunError(`Checkpoint failed for ${stage.id}: ${commit.stderr.trim()}`);
+      stage.checkpoint_commit = utils.git(repo, ['rev-parse', 'HEAD']).stdout.trim();
+      stage.checkpoint_subject = message;
+    }
     if (eligible.length) {
       const staged = utils.git(repo, ['diff', '--cached', '--name-only', '--', ...eligible]).stdout
         .split('\n').map((filePath: string) => filePath.trim()).filter(Boolean)
@@ -45,8 +55,6 @@ const defaultRecord: Partial<RunRecord> = {
       if (staged.length) throw new RunError(`Checkpoint for ${stage.id} refuses paths already staged before this attempt: ${staged.join(', ')}`);
       const add = utils.git(repo, ['add', '-A', '--', ...eligible], { allowFailure: true });
       if (add.status !== 0) throw new RunError(add.stderr.trim());
-      const ordinal = Math.max(1, record.stages.findIndex((item: any) => item.id === stage.id) + 1);
-      const message = `stage-${ordinal}: ${stage.title}${attempt > 1 ? ` (fix ${attempt})` : ''}`;
       const commit = utils.git(repo, ['commit', '--only', '-m', message, '--', ...eligible], { allowFailure: true });
       if (commit.status !== 0) throw new RunError(`Checkpoint failed for ${stage.id}: ${commit.stderr.trim()}`);
       stage.checkpoint_commit = utils.git(repo, ['rev-parse', 'HEAD']).stdout.trim();
@@ -54,7 +62,6 @@ const defaultRecord: Partial<RunRecord> = {
     }
     const branch = utils.git(repo, ['branch', '--show-current']).stdout.trim();
     const pushed = pushCheckpoint(repo, branch);
-    const ordinal = Math.max(1, record.stages.findIndex((item: any) => item.id === stage.id) + 1);
     const stageCommit = utils.git(repo, ['log', '--format=%H', `--grep=^stage-${ordinal}:`, '-1'], { allowFailure: true });
     if (stageCommit.status === 0 && stageCommit.stdout.trim()) stage.checkpoint_commit = stageCommit.stdout.trim();
     stage.pushed = pushed.passed;
