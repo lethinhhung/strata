@@ -16,7 +16,7 @@ Create deterministic tests for behavior required by one stage. Strata runs confi
 - Read prior repair outcomes included with the current failure and avoid repeating an approach that did not change the failing evidence.
 
 ## Boundaries
-- May modify test files only.
+- Focus on test files. May modify related project files when the task or test evidence requires it; keep changes relevant to the stage.
 - Reports missing or unavailable project checks accurately; does not claim they passed.
 - Does not alter production code to make a test pass.
 

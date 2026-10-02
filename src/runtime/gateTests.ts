@@ -3,7 +3,6 @@ import * as helpers from './helpers.js';
 import { agentStep } from './agentStep.js';
 import { canEditProjectPath } from './editPolicy.js';
 import { workflowChecks } from './checks.js';
-import { isTestPath } from './testPath.js';
 
 export async function createTests(args: any) {
   const { repo, record, stage, config, file, context, coordination, setupEvidence } = args;
@@ -14,8 +13,8 @@ export async function createTests(args: any) {
     : 'No test command is configured. Run the narrowest relevant project test command if one is available; do not run the repository-wide suite unless this stage requires it.';
   const tested = await agentStep(record, file, 'test', stage.id, () => utils.askScoped(config, 'Test Agent', {
     repo,
-    text: `Create or update deterministic tests for this stage. Edit test files only; do not alter production code or unrelated files. Avoid duplicating Strata's configured command runs. ${checkHandoff}\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nRELEVANT MEMORY HANDOFF:\n${coordination.memory_handoff ?? 'No relevant memory identified.'}\nTASK:\n${coordination.test_task ?? ''}\nSETUP EVIDENCE:\n${utils.json(setupEvidence)}`,
-  }, context, { allowedPath: (target: string) => isTestPath(target) && canEditProjectPath(target, repo, record, file) }));
+    text: `Create or update deterministic tests for this stage. Focus on test files, and make related project changes only when the task or test evidence requires them. Keep every change relevant to the stage; do not edit specs, memory, run records, or unrelated files. Avoid duplicating Strata's configured command runs. ${checkHandoff}\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nRELEVANT MEMORY HANDOFF:\n${coordination.memory_handoff ?? 'No relevant memory identified.'}\nTASK:\n${coordination.test_task ?? ''}\nSETUP EVIDENCE:\n${utils.json(setupEvidence)}`,
+  }, context, { allowedPath: (target: string) => canEditProjectPath(target, repo, record, file) }));
   const changed = utils.changes(before, utils.runSnapshot(repo, record, file));
   const violations = tested.discarded;
   stage.accepted_paths = [...new Set([...(stage.accepted_paths ?? []), ...changed])];

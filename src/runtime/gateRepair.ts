@@ -3,7 +3,6 @@ import * as helpers from './helpers.js';
 import { RunError } from './types.js';
 import { agentStep } from './agentStep.js';
 import { canEditProjectPath } from './editPolicy.js';
-import { isTestPath } from './testPath.js';
 import { workflowChecks } from './checks.js';
 
 export async function repairGate(repo: string, record: any, stage: any, config: any, file: string,
@@ -14,8 +13,7 @@ export async function repairGate(repo: string, record: any, stage: any, config: 
   const attempt = record.events.filter((event: any) => event.type === 'repair' && event.stage_id === stage.id && event.details?.gate === gate).length + 1;
   record.events.push({ type: 'repair', stage_id: stage.id, attempt, details: { gate, role, findings }, at: utils.now() });
   const before = utils.runSnapshot(repo, record, file);
-  const allowedPath = (target: string) => canEditProjectPath(target, repo, record, file) &&
-    (role !== 'tests' || isTestPath(target));
+  const allowedPath = (target: string) => canEditProjectPath(target, repo, record, file);
   const hasTestCommand = workflowChecks(config.workflow).some((check: any) => check.kind === 'test');
   const verifyInstruction = gate === 'test'
     ? hasTestCommand
