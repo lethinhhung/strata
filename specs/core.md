@@ -48,7 +48,7 @@ Strata owns orchestration mechanics and stage gates. Coordinators plan and prepa
 - Strata discovers checks from explicit project configuration or project instructions; it must not invent a requirement for a check the project does not use. A check absent from the project is not a failure.
 - Review, test, validation, and configured-check findings are routed to an edit-capable agent for bounded repair cycles. If the limit is reached, the stage is committed with unresolved findings recorded. A concrete blocker or commit failure halts the run.
 - Repair limits are configured per gate and default to three cycles. A limit does not erase the finding: it is recorded in the stage report and surfaced in the run outcome.
-- A stage is complete only after its `stage-N:` commit exists. Push is attempted with retry and rebase; a push failure is recorded but does not prevent later stages. A stage commit failure halts the run.
+- A stage is complete only after its `stage-N:` commit exists. Push is attempted with retry and rebase; a failed rebase is aborted to restore the worktree and index before later stages continue. A push failure is recorded but does not prevent later stages. A stage commit failure halts the run.
 - Commit only the completed stage's changes, with an identifiable stage/checkpoint message. A commit failure leaves the stage incomplete and resumable.
 
 ## 8. Run Completion and Memory
