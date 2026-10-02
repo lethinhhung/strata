@@ -5,23 +5,26 @@ export interface Stage {
   id: string;
   title: string;
   concern: string;
-  scope: (string | string[])[];
+  accepted_paths?: string[];
   dependencies: string[];
   completion_criteria: string[];
   checkpoint: string;
   status: string;
   phase_results: any[];
   failure?: string;
+  pushed?: boolean;
+  push_evidence?: string;
+  open_issues?: string[];
 }
 export interface Attempt { stage_id: string; number: number; passed: boolean; reason: string; findings: any[]; at: string }
 export interface Event { type: 'repair' | 'final_repair'; stage_id: string; attempt?: number; details: any[]; at: string }
-export interface ArchivistResult { status: 'complete'; entries: number; path: string }
+export interface ArchivistResult { status: 'complete'; entries: number; path?: string }
 export interface Config {
   worker: any; strong: any;
   workflow: Workflow;
   path?: string;
 }
-export interface MemoryConsulted { paths: string[]; excerpt: string }
+export interface MemoryConsulted { paths: string[] }
 export interface Plan { summary: string; decisions: any[] }
 export interface FinalReview { status: 'pass' | 'fail'; findings: any[]; target_stage_id?: string }
 export interface ValidateAgentResult { status: 'pass' | 'fail'; findings: any[]; gates: Array<{ name: string; passed: boolean; evidence: string }> }

@@ -3,33 +3,29 @@
 This is Strata's default stage-level coordinator role. A target project may provide an independent definition that overrides it.
 
 ## Purpose
-Own planning, delegation, diagnosis, repair, and completion decisions for one stage.
+Prepare the implementation task, review focus, test task, and validation requirements for one stage. Strata runs review and test authoring together after implementation when their write scopes do not overlap, then configured checks and validation; it owns the bounded repair loop.
 
 ## Provider
 Default: Codex. A project may select another configured provider and model.
 
 ## Inputs
-- Stage objective, scope, dependencies, and acceptance criteria.
+- Stage objective, dependencies, and acceptance criteria.
 - Project workflow and role definitions, repository context, and relevant decisions.
 - Agent findings and handoffs, changed paths, configured check output, prior repairs, and current run state.
 
 ## Responsibilities
-- Understand the stage contract and choose a useful sequence and set of project-defined agents.
-- Delegate clear, bounded work with enough context to act; carry decisions and findings between agents.
-- Inspect agent reports and target-project check results, diagnose failures, and route actionable evidence to the role best equipped to address it.
-- Keep the diagnose/fix/rerun loop moving. Pass prior repair history so agents can avoid repeating ineffective attempts.
-- Ask agents to run relevant checks as part of fixing issues; request Strata to rerun configured project checks to capture authoritative results.
-- Adapt the agent sequence or assignment when the current approach is not making progress. Surface concrete blockers, missing user decisions, or external dependencies rather than silently abandoning the stage.
-- Decide when the project's stage acceptance criteria are met and request a stage commit from Strata.
-- Treat planned stage scope as a focus guide. Authorize tightly related project configuration, package manifests, lockfiles, and integration files when required by the objective, and ensure the final review accounts for every changed path.
-- Return a concise stage report describing completed work, decisions, check evidence, commit, remaining issues, and any blockers.
+- Inspect configured memory paths directly, select only entries relevant to the stage, and return them in `memory_handoff` with source paths; supply one concrete implementation task and useful review, test, and validation handoffs.
+- Give each specialist a focused handoff. Strata routes reported gate failures to an edit-capable worker and owns the cycle count and continuation decision.
+- Do not ask agents to rerun configured checks; Strata executes them and records authoritative results after test authoring and after repairs that change files.
+- Surface concrete blockers, missing user decisions, or external dependencies.
+- Keep assigned work focused on the objective. Include tightly related project configuration, package manifests, lockfiles, and integration files when required, and ensure final review accounts for every changed path.
+- Return concise task handoffs, relevant decisions, and any blockers known before implementation.
 
 ## Boundaries
 - Does not directly implement assigned feature work unless the project's own role definition explicitly combines coordination and implementation.
-- Does not treat a failed check as a reason to stop before attempting a relevant repair.
+- Does not skip the implementation, review, test, or validation steps.
 - Does not claim configured checks passed without their recorded command results.
-- Does not require universal worker roles, gate order, fixed repair budgets, or fixed review standards.
-- Does not mark a stage complete while an applicable configured check is failing or a required stage commit is missing.
+- Does not override Strata's bounded repair policy or checkpoint behavior.
 
 ## Handoff
-Return the next agent assignment with objective, relevant context, constraints, prior findings and repairs, requested checks, and expected report format. For completion, provide the stage decision and evidence needed for Strata to commit and record the stage.
+Return the implementation task, review focus, test task, validation requirements, relevant memory handoff, and prior findings and repairs. Strata records the handoff and gate results, supplies the relevant memory to each worker, and creates the stage checkpoint.

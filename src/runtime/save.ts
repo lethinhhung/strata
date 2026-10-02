@@ -14,7 +14,7 @@ const defaultRecord: Partial<RunRecord> = {
       epic_path: '',
       epic_absolute_path: '',
      config: { worker:{}, strong:{}, workflow:{ max_repairs:0, review_repair_attempts:0, test_repair_attempts:0, validation_repair_attempts:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', memory_policy:'', test_commands:[], quality_checks:[], setup_commands:[], require_agent_gates:true }, path:undefined },
-      memory_consulted: { paths:[], excerpt:'' },
+      memory_consulted: { paths:[] },
       plan: undefined,
       updated_at: undefined,
       final_review: undefined,
@@ -39,7 +39,7 @@ const defaultRecord: Partial<RunRecord> = {
   const listener = record.onProgress as ((entry: any) => void) | undefined;
   const sent = (record.progress_sent as number | undefined) ?? 0;
   if (listener && emitProgress) {
-    for (const entry of record.progress.slice(sent)) listener(entry);
+    for (const entry of record.progress.slice(sent)) listener({ ...entry });
     Object.defineProperty(record, 'progress_sent', { value: record.progress.length, writable: true, configurable: true });
   }
 }

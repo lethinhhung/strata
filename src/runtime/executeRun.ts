@@ -1,9 +1,6 @@
 import { RunError, RunRecord } from './types.js';
 import * as utils from './utils.js';
 import { runStageWithRepairs } from './runStageWithRepairs.js';
-import { finalValidation } from './finalValidation.js';
-import { archiveMemory } from './archiveMemory.js';
-import { agentStep } from './agentStep.js';
 
 export async function executeRun(repo: string, record: any, config: any, file: string) {
   // Ensure record has all required fields
@@ -18,7 +15,7 @@ const defaultRecord: Partial<RunRecord> = {
      epic_path: '',
      epic_absolute_path: '',
      config: { worker:{}, strong:{}, workflow:{ max_repairs:0, review_repair_attempts:0, test_repair_attempts:0, validation_repair_attempts:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', memory_policy:'', test_commands:[], quality_checks:[], setup_commands:[], require_agent_gates:true }, path:undefined },
-     memory_consulted: { paths:[], excerpt:'' },
+     memory_consulted: { paths:[] },
      plan: undefined,
      updated_at: undefined,
      final_review: undefined,
@@ -51,50 +48,17 @@ const defaultRecord: Partial<RunRecord> = {
       : stage.failure ?? '';
     await runStageWithRepairs(repo, record, stage, config, file, repairContext);
   }
-  let final = await finalValidation(repo, record, config, file);
-  while (!final.passed) {
-    const targetId = final.review.target_stage_id ?? final.validation.target_stage_id;
-    const target = record.stages.find((stage: any) => stage.id === targetId) ?? record.stages.slice(-1)[0];
-    record.events.push({ type: 'final_repair', stage_id: target.id, findings: { review: final.review.findings, validation: final.validation.findings, evidence: final.evidence }, at: utils.now() });
-    target.status = 'pending';
-    utils.save(record, file);
-    await runStageWithRepairs(repo, record, target, config, file, utils.json({ final_review: final.review, final_validation: final.validation, evidence: final.evidence }));
-    final = await finalValidation(repo, record, config, file);
-  }
-  if (!final.passed) {
-    record.progress.push({ type: 'run', subtype: 'fail', timestamp: utils.now() });
-    throw new RunError('Final integration review or validation failed; run record is preserved for resumption');
-  }
-  if (config.workflow.checkpoint) {
-    const tag = `${config.workflow.checkpoint_prefix}-epic-${record.run_id}`;
-    const result = utils.git(repo, ['tag', '-a', tag, '-m', `Completed Strata epic ${record.run_id}`], { allowFailure: true });
-    if (result.status !== 0) throw new RunError(`Epic checkpoint failed: ${result.stderr.trim()}`);
-    record.epic_checkpoint = tag;
-    // Record epic checkpoint gate transition
-    record.progress.push({ type: 'gate', subtype: 'checkpoint', stage_id: 'epic', timestamp: utils.now(), passed: true });
-  }
+  // Stage gates and stage-N commits are the workflow's completion boundary.
+  // As in implement-huge-feature, there is no second epic-wide gate or tag.
   record.status = 'complete';
   record.completed_at = utils.now();
   record.progress.push({ type: 'run', subtype: 'complete', timestamp: utils.now() });
   utils.save(record, file);
-   let archiveError = null;
-   let archivalResult;
-   try {
-     archivalResult = await agentStep(record, file, 'archive', 'epic', () => archiveMemory(repo, record, config));
-   } catch (error) {
-     archiveError = error;
-   }
-   if (archiveError) {
-     record.archival = { status: 'failed', reason: archiveError instanceof Error ? archiveError.message : String(archiveError) };
-   } else {
-     record.archival = archivalResult;
-   }
-   utils.save(record, file);
 }
 
 function hasCheckpoint(repo: string, stage: any, config: any) {
   if (!config.workflow.checkpoint) return false;
   if (typeof stage.checkpoint_commit !== 'string' || !stage.checkpoint_commit) return false;
-  const result = utils.git(repo, ['cat-file', '-e', `${stage.checkpoint_commit}^{commit}`], { allowFailure: true });
+  const result = utils.git(repo, ['merge-base', '--is-ancestor', stage.checkpoint_commit, 'HEAD'], { allowFailure: true });
   return result.status === 0;
 }

@@ -17,7 +17,7 @@ npm link
 strata init
 ```
 
-Strata runs in the repository selected by `--repo` and preserves the current branch and unrelated work. It requires a clean worktree apart from the Strata config and selected epic input when starting a run.
+Strata runs in the repository selected by `--repo`, on the current branch or a branch selected with `--branch`. It refuses the default branch and requires a clean worktree apart from Strata config and the selected epic input. Each completed stage is committed as `stage-N: ...` and pushed to `origin`; push failures are recorded while later stages continue.
 
 ## Configure
 
@@ -35,7 +35,7 @@ Role tables also support `extra_args` and `instructions_path`. Role names use lo
 
 Configure project checks with `workflow.checks` when needed. Otherwise, Strata discovers `test:ci` (or `test`), `lint`, `typecheck`, and `build` scripts in the target `package.json`; the package manager comes from the lockfile. Missing scripts are not invented. Commands run from the target repository and their output is included in the agent handoff.
 
-The Stage Coordinator decides how specialist reports affect completion and assigns repairs. Strata does not impose fixed review, validation, or repair-count gates. Configured checks must pass, and each completed stage is committed. If a concrete blocker prevents progress, the run record remains resumable.
+Each stage follows implementation → review → test → validation. A bounded repair loop routes findings back to an agent; if the configured repair limit is reached, Strata commits the stage with unresolved findings recorded. A concrete blocker or commit failure halts the run and leaves its record resumable. UI stages use the `Screen Implementer` role; logic stages use `Implement Agent`.
 
 ## Run an epic
 
@@ -43,6 +43,8 @@ Use a prompt file:
 
 ```sh
 strata run path/to/epic.md --repo .
+strata run path/to/epic.md --repo . --branch feature/epic
+strata run path/to/epic.md --repo . --review-plan
 ```
 
 Or pass the prompt directly:
@@ -59,7 +61,17 @@ strata status RUN_ID
 strata resume RUN_ID --repo .
 ```
 
-Run records are saved under `docs/temps/` with the stage plan, role handoffs, check evidence, repair history, and checkpoints. Completed stages are skipped on resume when their checkpoint commits remain available.
+After reviewing a successful run, archive durable engineering memory separately:
+
+```sh
+strata archive RUN_ID --repo .
+```
+
+Run and resume never write memory automatically. The Archivist writes concise entries to `decisions.md`, `notes.md`, and `progress.md` under `workflow.memory_path`, following the repository's memory README when present.
+
+`--review-plan` saves the decomposed plan in the run record and stops before implementation. Inspect or edit that record with `strata status RUN_ID`, then continue with `strata resume RUN_ID --repo .`.
+
+Run records are saved under `docs/temps/` with the stage plan, role handoffs, check evidence, repair history, push results, unresolved findings, and checkpoints. Completed stages are skipped on resume when their checkpoint commits remain available.
 
 ## Development
 

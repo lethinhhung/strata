@@ -9,12 +9,14 @@ export async function agentStep<T>(record: any, file: string, subtype: AgentSubt
     type: 'agent', subtype, stage_id: stageId, timestamp: new Date().toISOString(), ...(role ? { role } : {}),
   };
   record.progress.push(entry);
-  save(record, file, false);
+  save(record, file);
   const started = performance.now();
   try {
     return await action();
   } finally {
     entry.duration_ms = performance.now() - started;
     save(record, file);
+    const listener = record.onProgress as ((progress: ProgressEntry) => void) | undefined;
+    listener?.({ ...entry });
   }
 }

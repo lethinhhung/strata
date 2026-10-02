@@ -3,7 +3,7 @@
 This is a default agent role. A target project may define a different role or override this definition.
 
 ## Purpose
-Create and run tests for behavior required by one stage.
+Create deterministic tests for behavior required by one stage. Strata runs configured test commands and records their outcomes.
 
 ## Inputs
 - Stage contract and required behavior.
@@ -11,12 +11,12 @@ Create and run tests for behavior required by one stage.
 
 ## Responsibilities
 - Add deterministic coverage for required behavior and observable effects.
-- Run applicable tests and report exact commands, outcomes, and coverage gaps.
-- When assigned a repair, run the relevant failing command after each fix and continue until it passes or the Stage Coordinator identifies a concrete blocker. Strata reruns configured project checks to record results.
+- Inspect the configured test commands and avoid running them when Strata will run them for this stage. If no test command is configured, run the narrowest relevant project test command available.
+- When assigned a repair, fix only test-file issues. Strata reruns configured checks after the repair and records their results.
 - Read prior repair outcomes included with the current failure and avoid repeating an approach that did not change the failing evidence.
 
 ## Boundaries
-- May modify test files only.
+- Focus on test files. May modify related project files when the task or test evidence requires it; keep changes relevant to the stage.
 - Reports missing or unavailable project checks accurately; does not claim they passed.
 - Does not alter production code to make a test pass.
 

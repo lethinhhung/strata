@@ -3,16 +3,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 export function stageContract(stage: any) {
-  return Object.fromEntries(['id', 'title', 'concern', 'scope', 'accepted_paths', 'dependencies', 'completion_criteria', 'checkpoint'].map((key) => [key, stage[key]]));
-}
-
-export function inScope(file: string, scopes: string[]) {
-  return scopes.some((scope) => {
-    const normalized = scope.replace(/\\/g, '/').replace(/\/$/, '');
-    if (normalized === file || file.startsWith(`${normalized}/`)) return true;
-    const escaped = normalized.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]?').replace(/\u0000/g, '.*');
-    return new RegExp(`^${escaped}$`).test(file);
-  });
+  return Object.fromEntries(['id', 'title', 'concern', 'accepted_paths', 'dependencies', 'completion_criteria', 'checkpoint'].map((key) => [key, stage[key]]));
 }
 
 export function isTestPath(file: string) {

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, initConfig, loadConfig } from './config.js';
-import { loadRun, recordPath, resumeRun, RunError, startRun } from './runtime.js';
+import { archiveMemory, loadRun, recordPath, resumeRun, RunError, startRun } from './runtime.js';
 import type { RunRecord } from './runtime/types.js';
 import { args } from './cliArgs.js';
 import { createProgressReporter, formatFailure, formatOutcome } from './progress.js';
@@ -14,9 +14,10 @@ const usage = `Strata — specification-led feature implementation runtime
 
 Usage:
   strata init [--repo DIR] [--force]
-  strata run EPIC [--repo DIR] [--config FILE]
-  strata run --prompt TEXT [--repo DIR] [--config FILE]
+  strata run EPIC [--repo DIR] [--config FILE] [--branch NAME] [--review-plan]
+  strata run --prompt TEXT [--repo DIR] [--config FILE] [--branch NAME] [--review-plan]
   strata resume RUN_ID_OR_FILE [--repo DIR] [--config FILE]
+  strata archive RUN_ID_OR_FILE [--repo DIR] [--config FILE]  # after reviewing a successful run
   strata status [RUN_ID_OR_FILE] [--repo DIR]
   strata config-example
   strata --version`;
@@ -64,12 +65,13 @@ async function main(): Promise<number> {
     const reporter = createProgressReporter();
     let record: RunRecord;
     try {
-      record = await startRun(repo, positional[1] ?? '', config, reporter.print, inlinePrompt);
+      record = await startRun(repo, positional[1] ?? '', config, reporter.print, inlinePrompt, typeof options.branch === 'string' ? options.branch : undefined, options.reviewPlan === true);
     } finally {
       reporter.finish();
     }
     console.log(formatOutcome('run', record, recordPath(repo, record.run_id)));
-    return record.status === 'complete' ? 0 : 1;
+    if (record.status === 'complete' && !record.archival) console.log(`After reviewing, archive durable memory with: strata archive ${record.run_id} --repo ${repo}`);
+    return record.status === 'complete' || record.status === 'planned' ? 0 : 1;
   }
   if (command === 'resume') {
     if (!positional[1]) throw new Error('resume requires a run id or record path');
@@ -82,7 +84,16 @@ async function main(): Promise<number> {
       reporter.finish();
     }
     console.log(formatOutcome('resume', record, file));
+    if (record.status === 'complete' && !record.archival) console.log(`After reviewing, archive durable memory with: strata archive ${record.run_id} --repo ${repo}`);
     return record.status === 'complete' ? 0 : 1;
+  }
+  if (command === 'archive') {
+    if (!positional[1]) throw new Error('archive requires a run id or record path');
+    const file = resolveRun(repo, positional[1]);
+    const record = loadRun(file);
+    const archival = await archiveMemory(repo, record, config, file);
+    console.log(`archive ${record.run_id}: ${archival.entries} memory entr${archival.entries === 1 ? 'y' : 'ies'}${archival.path ? ` — ${archival.path}` : ''}`);
+    return 0;
   }
   throw new Error(`Unknown command ${command ?? '(empty)'}`);
 }

@@ -18,7 +18,8 @@ export function args(argv: string[]): Args {
     if (token === '--help' || token === '-h') options.help = true;
     else if (token === '--version') options.version = true;
     else if (token === '--force') options.force = true;
-    else if (token === '--repo' || token === '--config' || token === '--prompt') {
+    else if (token === '--review-plan') options.reviewPlan = true;
+    else if (token === '--repo' || token === '--config' || token === '--prompt' || token === '--branch') {
       if (!argv[i + 1]) throw new Error(`${token} requires a value`);
       options[token.slice(2)] = argv[++i];
     } else if (token.startsWith('-')) throw new Error(`Unknown option ${token}`);

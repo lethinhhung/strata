@@ -15,7 +15,7 @@ export async function runStage(repo: string, record: any, stage: any, config: an
   const exploration = await agentStep(record, file, 'explore', stage.id, () => utils.askReadOnly(config, 'Explore Agent', {
     repo,
     shape: '{"status":"pass|fail","findings":[],"files":[],"summary":"...","uncertainties":[]}',
-    text: `Read-only repository investigation for this stage. Locate relevant files, conventions, tests, APIs, and dependencies. Do not edit files or decide architecture. Stage contract:\n${utils.json(helpers.stageContract(stage))}`,
+    text: `Read-only repository investigation for this stage. Locate relevant files, conventions, tests, APIs, and dependencies. Do not edit files or decide architecture. The Stage Coordinator will inspect configured advisory memory as needed.\nSTAGE CONTRACT:\n${utils.json(helpers.stageContract(stage))}`,
   }, specContext, {}));
   const afterExplore = utils.runSnapshot(repo, record, file);
   const explorationMutation = utils.changes(beforeExplore, afterExplore);
@@ -24,65 +24,32 @@ export async function runStage(repo: string, record: any, stage: any, config: an
 
   const coordination = await agentStep(record, file, 'stage_coordinator', stage.id, () => utils.askReadOnly(config, 'Stage Coordinator', {
     repo,
-    shape: '{"agent_tasks":[{"role":"project-defined role","task":"...","read_only":false}],"run_review":true,"run_tests":true,"run_validation":true,"implementation_task":"...","review_focus":[],"test_task":"...","validation_requirements":[],"memory_handoff":"..."}',
-    text: `Coordinate this stage with a fresh context. Do not implement. Follow project role definitions and acceptance criteria. Treat stage scope as the planned focus, not a hard file boundary. Agents have two permission modes: edit or read-only. Choose read_only for analysis-only tasks; edit agents may change any task-relevant project files, with no role-specific file ownership. You may create an ordered agent_tasks list using any project-defined roles; each task must be concrete and related to the stage objective. Decide whether the default review, test-authoring, and validation specialists are useful with run_review, run_tests, and run_validation. If there are no custom agent_tasks, provide implementation_task for the default Implement Agent. Include project-appropriate handoffs and prior repair findings.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nEXPLORE FINDINGS:\n${utils.json(exploration)}\nMEMORY:\n${record.memory_consulted.excerpt}\nPRIOR RESULTS:\n${utils.json(stage.phase_results)}\nREPAIR FINDINGS:\n${repairContext}`,
+    shape: '{"implementation_task":"...","review_focus":[],"test_task":"...","validation_requirements":[],"memory_handoff":"..."}',
+    text: `Coordinate this stage with a fresh context. Do not implement. Follow project role definitions and acceptance criteria. The runner implements first, then performs review and test authoring in parallel, runs configured checks, and validates the resulting tree. Do not skip a specialist or replace the pipeline with custom agent_tasks. Keep work directly relevant to the stage objective. Inspect configured advisory memory paths directly when useful, verify relevant entries against the current repository, and return a concise memory_handoff with source paths for implementation, review, test, validation, and repair agents. Give the implementer one concrete task, then provide review focus, test task, validation requirements, and project-appropriate handoffs. Include prior repair findings.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nEXPLORE FINDINGS:\n${utils.json(exploration)}\nCONFIGURED MEMORY PATHS:\n${utils.json(record.memory_consulted.paths)}\nPRIOR RESULTS:\n${utils.json(stage.phase_results)}\nREPAIR FINDINGS:\n${repairContext}`,
   }, specContext, { strong: true }));
+  coordination.run_review = true;
+  coordination.run_tests = true;
+  coordination.run_validation = true;
   helpers.addPhase(stage, 'stage_coordination', coordination);
   utils.save(record, file);
 
   const beforeImplement = utils.runSnapshot(repo, record, file);
-  let implementation: any;
-  let implementationAttempt: any;
-  if (Array.isArray(coordination.agent_tasks) && coordination.agent_tasks.length) {
-    const handoffs: any[] = [];
-    const attempted: string[] = [];
-    const discarded: string[] = [];
-    for (const task of coordination.agent_tasks) {
-      if (!task || typeof task.role !== 'string' || !task.role.trim() || typeof task.task !== 'string') {
-        throw new RunError('Stage Coordinator returned an invalid agent_tasks entry');
-      }
-      const role = task.role.trim();
-      const taskRequest = {
-        repo,
-        text: `Complete your assigned project role task in service of the stage objective. Stage scope is the planned focus, not a hard file boundary. Edit agents may change any task-relevant project files; read-only agents should analyze and report without editing. Preserve unrelated work and report concrete changes and outcomes.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nASSIGNED TASK:\n${task.task}\nPRIOR AGENT HANDOFFS:\n${utils.json(handoffs)}\nREPAIR FINDINGS:\n${repairContext}`,
-      };
-      const rawResult = await agentStep(record, file, 'custom', stage.id, () => task.read_only
-        ? utils.askReadOnly(config, role, taskRequest, specContext)
-        : utils.askScoped(config, role, taskRequest, specContext, {
-          allowedPath: (filePath: string) => canEditProjectPath(filePath, repo, record, file),
-        }), role);
-      const result = task.read_only
-        ? { result: rawResult, applied: [], attempted: [], discarded: [] }
-        : rawResult;
-      handoffs.push({ role, result: result.result, attempted: result.attempted, discarded: result.discarded });
-      attempted.push(...result.attempted);
-      discarded.push(...result.discarded);
-      helpers.addPhase(stage, `agent_${role.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`, result.result, {
-        observed_changed_paths: result.applied,
-        attempted_changed_paths: result.attempted,
-        discarded_changed_paths: result.discarded,
-      });
-      utils.save(record, file);
-    }
-    implementation = { status: 'pass', findings: [], handoffs };
-    implementationAttempt = { attempted, discarded };
-  } else {
-    implementationAttempt = await agentStep(record, file, 'implement', stage.id, () => utils.askScoped(config, 'Implement Agent', {
-      repo,
-      text: `Implement or repair the assigned work for this stage. Stage scope is the planned focus, not a hard file boundary; make necessary related project configuration, manifests, lockfiles, integration, source, or test changes when required by the task. Keep changes relevant to the objective. Do not edit specs, memory, run records, or unrelated files. Use reported gate findings to fix the underlying cause, and avoid changing tests to conceal a production defect. Return observed changed paths and checks.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.implementation_task}\nREPAIR FINDINGS:\n${repairContext}`,
-    }, specContext, {
-      allowedPath: (filePath: string) => canEditProjectPath(filePath, repo, record, file),
-    }));
-    implementation = implementationAttempt.result;
-  }
+  const implementerRole = /\b(screen|ui|component|navigation|admin page|expo|native|web page|paywall|onboarding|landing|form)\b/i
+    .test(`${stage.title} ${stage.concern} ${stage.completion_criteria.join(' ')}`) ? 'Screen Implementer' : 'Implement Agent';
+  const implementationAttempt = await agentStep(record, file, 'implement', stage.id, () => utils.askScoped(config, implementerRole, {
+    repo,
+    text: `Implement or repair the assigned work for this stage. Make necessary related project configuration, manifests, lockfiles, integration, and source changes when required by the task. Keep changes relevant to the objective. Do not edit test files, specs, memory, run records, or unrelated files; the Test Agent owns test files. Use reported gate findings to fix the underlying cause, and avoid changing requirements to conceal a production defect. Do not rerun configured project checks; Strata runs them after this phase. Return changed paths and any checks you did not run.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nCOORDINATOR TASK:\n${coordination.implementation_task}\nRELEVANT MEMORY HANDOFF:\n${coordination.memory_handoff ?? 'No relevant memory identified.'}\nREPAIR FINDINGS:\n${repairContext}`,
+  }, specContext, {
+    allowedPath: (filePath: string) => canEditProjectPath(filePath, repo, record, file),
+  }), implementerRole);
+  const implementation = implementationAttempt.result;
 
   const implementChanges = utils.changes(beforeImplement, utils.runSnapshot(repo, record, file));
-  const retainedSourceChanges = [...Array.from(utils.runSnapshot(repo, record, file).keys())]
-    .filter((filePath: string) => helpers.inScope(filePath, stage.scope) || (stage.accepted_paths ?? []).includes(filePath));
+  const retainedSourceChanges = [...(stage.accepted_paths ?? [])];
   if (stage.checkpoint_commit) {
     const checkpointedPaths = utils.git(repo, ['show', '--format=', '--name-only', stage.checkpoint_commit]).stdout
       .split('\n').map((filePath: string) => filePath.trim()).filter(Boolean)
-      .filter((filePath: string) => helpers.inScope(filePath, stage.scope) || (stage.accepted_paths ?? []).includes(filePath));
+      .filter((filePath: string) => (stage.accepted_paths ?? []).includes(filePath));
     retainedSourceChanges.push(...checkpointedPaths);
   }
   const effectiveImplementChanges = (implementChanges.length ? implementChanges : Array.from(new Set(retainedSourceChanges)).sort());

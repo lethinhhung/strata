@@ -28,8 +28,8 @@ type ProgressReporter = {
 /** Print normal progress events while keeping a live elapsed-time line in a TTY. */
 export function createProgressReporter(isTTY = process.stdout.isTTY): ProgressReporter {
   let runStartedAt: number | undefined;
-  let stageStartedAt: number | undefined;
-  let stageId: string | undefined;
+  let stepStartedAt: number | undefined;
+  let stepName: string | undefined;
   let interval: ReturnType<typeof setInterval> | undefined;
   let tickerVisible = false;
 
@@ -43,9 +43,9 @@ export function createProgressReporter(isTTY = process.stdout.isTTY): ProgressRe
     if (!isTTY || runStartedAt === undefined) return;
     const now = Date.now();
     const runTime = formatElapsed(now - runStartedAt);
-    const stageTime = stageStartedAt === undefined ? undefined : formatElapsed(now - stageStartedAt);
-    const stage = stageId && stageTime ? `Stage ${stageId} ${stageTime} | ` : '';
-    process.stdout.write(`\r\x1b[2K⏱ ${stage}Total ${runTime}`);
+    const stepTime = stepStartedAt === undefined ? undefined : formatElapsed(now - stepStartedAt);
+    const step = stepName && stepTime ? `Stage ${stepName} ${stepTime} | ` : '';
+    process.stdout.write(`\r\x1b[2K⏱ ${step}Total ${runTime}`);
     tickerVisible = true;
   };
 
@@ -57,20 +57,26 @@ export function createProgressReporter(isTTY = process.stdout.isTTY): ProgressRe
       }
       if (entry.type === 'stage') {
         if (entry.subtype === 'in_progress') {
-          stageId = entry.stage_id;
-          stageStartedAt = Date.parse(entry.timestamp);
-          if (!Number.isFinite(stageStartedAt)) stageStartedAt = Date.now();
+          stepName = 'starting';
+          stepStartedAt = Date.parse(entry.timestamp);
+          if (!Number.isFinite(stepStartedAt)) stepStartedAt = Date.now();
         } else if (entry.subtype === 'complete' || entry.subtype === 'fail' || entry.subtype === 'skip') {
-          stageId = undefined;
-          stageStartedAt = undefined;
+          stepName = undefined;
+          stepStartedAt = undefined;
         }
+      } else if (entry.type === 'agent' || entry.type === 'gate') {
+        stepName = entry.type === 'agent'
+          ? (entry.role ?? entry.subtype).replace(/\s+Agent$/i, '').toLowerCase()
+          : entry.subtype;
+        stepStartedAt = Date.parse(entry.timestamp);
+        if (!Number.isFinite(stepStartedAt)) stepStartedAt = Date.now();
       }
 
       clearTicker();
       if (isTTY) process.stdout.write(`${formatProgress(entry)}\n`);
       else console.log(formatProgress(entry));
 
-      if (isTTY && (entry.type === 'run' || entry.type === 'stage')) {
+      if (isTTY && (entry.type === 'run' || entry.type === 'stage' || entry.type === 'agent' || entry.type === 'gate')) {
         if (!interval && runStartedAt !== undefined) interval = setInterval(renderTicker, 1000);
         renderTicker();
       }
@@ -94,7 +100,13 @@ function formatElapsed(milliseconds: number): string {
 }
 
 export function formatOutcome(action: 'run' | 'resume', record: { run_id: string; status: string }, reference: string) {
-  return `${action} ${record.run_id}: ${record.status} — ${reference}`;
+  const detailed = record as typeof record & { stages?: Array<{ checkpoint_commit?: string; pushed?: boolean; open_issues?: string[] }> };
+  const stages = detailed.stages ?? [];
+  const committed = stages.filter((stage) => stage.checkpoint_commit).length;
+  const pushed = stages.filter((stage) => stage.pushed).length;
+  const openIssues = stages.reduce((sum, stage) => sum + (stage.open_issues?.length ?? 0), 0);
+  const caveats = [committed ? `stages committed ${committed}/${stages.length}, pushed ${pushed}/${committed}` : '', openIssues ? `${openIssues} unresolved gate finding(s)` : ''].filter(Boolean);
+  return `${action} ${record.run_id}: ${record.status}${caveats.length ? ` — ${caveats.join('; ')}` : ''} — ${reference}`;
 }
 
 export function formatFailure(error: unknown) {
