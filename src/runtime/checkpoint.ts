@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import * as utils from './utils.js';
 import { RunError, RunRecord } from './types.js';
 
@@ -84,6 +86,15 @@ function pushCheckpoint(repo: string, branch: string) {
     const rebase = utils.git(repo, ['pull', '--rebase', 'origin', branch], { allowFailure: true });
     if (rebase.status !== 0) {
       last = `${last}\nPull --rebase failed: ${(rebase.stderr || rebase.stdout).trim()}`;
+      const mergeState = utils.git(repo, ['rev-parse', '--git-path', 'rebase-merge']).stdout.trim();
+      const applyState = utils.git(repo, ['rev-parse', '--git-path', 'rebase-apply']).stdout.trim();
+      const hasRebaseState = [mergeState, applyState].some((state) =>
+        state && fs.existsSync(path.isAbsolute(state) ? state : path.resolve(repo, state)));
+      if (hasRebaseState) {
+        const abort = utils.git(repo, ['rebase', '--abort'], { allowFailure: true });
+        if (abort.status !== 0) last += `\nCould not abort failed rebase: ${(abort.stderr || abort.stdout).trim()}`;
+        else last += '\nAborted the failed rebase and restored the pre-rebase worktree.';
+      }
       break;
     }
     // The source workflow waits between retries to avoid hammering the remote.
