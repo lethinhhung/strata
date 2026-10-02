@@ -23,7 +23,6 @@ export async function startRun(repo: string, epicPath: string, config: any, onPr
   if (utils.snapshot(repo, allowedPaths).size) throw new RunError('Start from a clean Git worktree apart from the Strata config and selected epic');
   const epic = isInline ? inlinePrompt! : fs.readFileSync(absoluteEpic, 'utf8');
   const memoryPaths = [config.workflow.memory_path, config.workflow.memory_policy].filter(Boolean);
-  const memory = utils.readTree(repo, memoryPaths, 12_000);
   const specs = utils.phaseContext(repo, config);
   const id = utils.runId();
   const file = utils.recordPath(repo, id);
@@ -37,7 +36,7 @@ const record: RunRecord = {
        epic_path: isInline ? '(inline prompt)' : path.relative(repo, absoluteEpic),
        epic_absolute_path: absoluteEpic,
        config: config.path,
-       memory_consulted: { paths: memoryPaths, excerpt: memory },
+       memory_consulted: { paths: memoryPaths },
        stages: [],
        attempts: [],
        events: [],
@@ -59,8 +58,8 @@ const record: RunRecord = {
   try {
      const plan = await agentStep(record, file, 'epic_coordinator', 'epic', () => utils.askReadOnly(config, 'Epic Coordinator', {
        repo,
-       shape: '{"summary":"...","decisions":[...],"stages":[{"id":"...","title":"...","kind":"logic|ui","mechanical":false,"concern":"...","scope":["path or glob"],"dependencies":[],"completion_criteria":[...],"checkpoint":"stable identity"}]',
-       text: `Inspect the supplied epic, repository snapshot, specifications, and advisory memory. Decompose the epic into sequential, single-concern stages and make architecture decisions before implementation. Keep data/API/business logic in logic stages and user-facing screens/components/navigation in UI stages; UI stages may consume existing logic but must not add backend behavior. Put logic before UI that depends on it. Mark primarily mechanical moves/extractions with mechanical=true. Every scope must be a non-empty list of repository paths or glob patterns. Each stage must include production source paths; include related test paths in that same stage scope when tests are needed. Never create a test-only stage. Agents have two permission modes: edit or read-only. Assign edit permission based on the task; do not impose role-specific file ownership. Do not implement.\nEPIC:\n${epic}\n\nSPECIFICATIONS:\n${specs}\n\nADVISORY MEMORY:\n${memory}\n\nBranch: ${utils.git(repo, ['branch', '--show-current']).stdout.trim()}\nTracked files:\n${utils.git(repo, ['ls-files']).stdout.slice(0, 20_000)}`,
+       shape: '{"summary":"...","decisions":[...],"stages":[{"id":"...","title":"...","concern":"...","dependencies":[],"completion_criteria":[...],"checkpoint":"stable identity"}]}',
+       text: `Inspect the supplied epic, repository snapshot, and project instructions. Read relevant entries directly from the configured advisory memory paths; verify them against the current repository and keep them advisory. Decompose the epic into sequential, single-concern stages and make architecture decisions before implementation. Keep data/API/business logic distinct from user-facing screens/components/navigation; UI stages may consume existing logic but must not add backend behavior. Put logic before UI that depends on it. Each stage should describe an independently reviewable outcome and include related production and test work when needed. Never create a test-only stage. Agents have two permission modes: edit or read-only. Assign edit permission based on the task; do not impose role-specific file ownership. Do not implement.\nEPIC:\n${epic}\n\nSPECIFICATIONS:\n${specs}\n\nCONFIGURED MEMORY PATHS:\n${utils.json(memoryPaths)}\n\nBranch: ${utils.git(repo, ['branch', '--show-current']).stdout.trim()}\nTracked files:\n${utils.git(repo, ['ls-files']).stdout.slice(0, 20_000)}`,
      }, specs, { strong: true }));
      record.plan = { summary: plan.summary ?? '', decisions: plan.decisions ?? [] };
      record.stages = utils.validatePlan(plan);

@@ -35,7 +35,7 @@ Strata owns orchestration mechanics and stage gates. Coordinators plan and prepa
 - See [project profile and provider resolution](project-profile.md).
 
 ## 6. Workflow and Context
-- The Coordinator inspects the epic and repository, loads applicable project instructions, and produces a stage plan with objectives, dependencies, completion criteria, checkpoint identities, and `logic` or `ui` kind.
+- The Coordinator inspects the epic and repository, loads applicable project instructions, and produces a stage plan with objectives, dependencies, completion criteria, and checkpoint identities.
 - Every stage runs implementation, then review and test authoring in parallel when their write scopes do not overlap (otherwise test authoring precedes review), configured checks, and validation. The Stage Coordinator supplies implementation instructions and handoff criteria; it cannot skip a specialist step.
 - Strata passes findings, decisions, changed paths, check outcomes, and prior repair attempts between roles. Agents must receive enough context to continue work without repeating failed approaches.
 - Review, test, validation, and configured-check failures are sent through bounded repair cycles. Reaching a configured limit records open findings and permits the stage commit; concrete blockers halt the run.
@@ -43,8 +43,8 @@ Strata owns orchestration mechanics and stage gates. Coordinators plan and prepa
 - Resumption restores the plan, stage state, role handoffs, and prior evidence. Completed stages are not repeated when their recorded commits remain present.
 
 ## 7. Checks, Completion, and Checkpointing
-- Every stage runs implementation, review, test, and validation. Review and test authoring run concurrently after implementation when their write scopes do not overlap; otherwise test authoring precedes review. Configured commands run once after authoring, followed by validation. UI stages use the screen implementer role; logic stages use the standard implementer role.
-- The project's configured automated checks are mechanical requirements. Run every configured test, lint, typecheck, build, or other check that applies to the target project once after test authoring, record the command and result, and return failures with their evidence to the relevant repair agent.
+- Every stage runs implementation, review, test, and validation. Review and test authoring run concurrently after implementation when their write scopes do not overlap; otherwise test authoring precedes review. Configured commands run once after authoring, followed by validation. Strata selects the screen implementer for objectives that describe user-facing UI work.
+- The project's configured automated checks are mandatory requirements. Run every configured test, lint, typecheck, build, or other check that applies to the target project once after test authoring, record the command and result, and return failures with their evidence to the relevant repair agent.
 - Strata discovers checks from explicit project configuration or project instructions; it must not invent a requirement for a check the project does not use. A check absent from the project is not a failure.
 - Review, test, validation, and configured-check findings are routed to an edit-capable agent for bounded repair cycles. If the limit is reached, the stage is committed with unresolved findings recorded. A concrete blocker or commit failure halts the run.
 - Repair limits are configured per gate and default to three cycles. A limit does not erase the finding: it is recorded in the stage report and surfaced in the run outcome.

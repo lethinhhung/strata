@@ -6,6 +6,12 @@ export function loadRun(file: string): RunRecord {
    const fenced = contents.match(/```json\s*([\s\S]*?)```/i);
    const record = JSON.parse(fenced?.[1] ?? contents);
    if (record.schema_version !== 1) throw new RunError(`Unsupported run record version: ${file}`);
+   if (record.memory_consulted) delete record.memory_consulted.excerpt;
+   for (const stage of record.stages ?? []) {
+     delete stage.scope;
+     delete stage.kind;
+     delete stage.mechanical;
+   }
    // Ensure progress field exists for backward compatibility
    if (!('progress' in record) || !Array.isArray(record.progress)) {
      record.progress = [];
@@ -18,7 +24,7 @@ const defaultRecord: Partial<RunRecord> = {
       epic_path: '',
       epic_absolute_path: '',
       config: { worker:{}, strong:{}, workflow:{ max_repairs:0, review_repair_attempts:0, test_repair_attempts:0, validation_repair_attempts:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', memory_policy:'', test_commands:[], quality_checks:[], setup_commands:[], require_agent_gates:true }, path:undefined },
-      memory_consulted: { paths:[], excerpt:'' },
+      memory_consulted: { paths:[] },
       plan: undefined,
       updated_at: undefined,
       final_review: undefined,

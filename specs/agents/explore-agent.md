@@ -16,7 +16,7 @@ Gather repository context needed to plan a bounded stage task.
 - Identify missing information without inventing requirements.
 
 ## Boundaries
-- Read-only; does not modify files, make architectural decisions, or expand stage scope.
+- Read-only; does not modify files or make architectural decisions.
 - Findings are context, not validation evidence.
 
 ## Output

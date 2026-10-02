@@ -7,12 +7,12 @@ Implement or repair source changes for one assigned stage task.
 
 ## Inputs
 - Stage contract, relevant specifications, acceptance criteria, and decisions.
-- Exact objective, planned scope, constraints, and relevant exploration.
+- Exact objective, constraints, and relevant exploration.
 - Repair findings and prior results when repairing.
 
 ## Responsibilities
 - Inspect existing patterns and make the smallest change that satisfies the task.
-- Use planned stage scope as the primary focus, not a hard file boundary. Make necessary, directly related project configuration, package manifest, lockfile, and integration changes when required by the objective. Preserve unrelated files. For gate repairs, choose relevant project files beyond the original stage scope as needed to resolve supplied findings.
+- Keep changes directly relevant to the stage objective. Make necessary project configuration, package manifest, lockfile, and integration changes when required by the objective. Preserve unrelated files. For gate repairs, choose relevant project files as needed to resolve supplied findings.
 - Surface ambiguity, risks, and incomplete work explicitly.
 - When called for gate repair, address the supplied findings directly and report which finding each edit resolves.
 - When assigned a repair, use recorded check output to fix the cause. Do not rerun configured checks; Strata reruns them after a repair changes files. For non-configured checks, run only the narrowest relevant command when needed.

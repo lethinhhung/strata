@@ -5,9 +5,6 @@ export interface Stage {
   id: string;
   title: string;
   concern: string;
-  kind?: 'ui' | 'logic';
-  mechanical?: boolean;
-  scope: (string | string[])[];
   dependencies: string[];
   completion_criteria: string[];
   checkpoint: string;
@@ -26,7 +23,7 @@ export interface Config {
   workflow: Workflow;
   path?: string;
 }
-export interface MemoryConsulted { paths: string[]; excerpt: string }
+export interface MemoryConsulted { paths: string[] }
 export interface Plan { summary: string; decisions: any[] }
 export interface FinalReview { status: 'pass' | 'fail'; findings: any[]; target_stage_id?: string }
 export interface ValidateAgentResult { status: 'pass' | 'fail'; findings: any[]; gates: Array<{ name: string; passed: boolean; evidence: string }> }

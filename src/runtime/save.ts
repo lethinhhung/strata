@@ -14,7 +14,7 @@ const defaultRecord: Partial<RunRecord> = {
       epic_path: '',
       epic_absolute_path: '',
      config: { worker:{}, strong:{}, workflow:{ max_repairs:0, review_repair_attempts:0, test_repair_attempts:0, validation_repair_attempts:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', memory_policy:'', test_commands:[], quality_checks:[], setup_commands:[], require_agent_gates:true }, path:undefined },
-      memory_consulted: { paths:[], excerpt:'' },
+      memory_consulted: { paths:[] },
       plan: undefined,
       updated_at: undefined,
       final_review: undefined,

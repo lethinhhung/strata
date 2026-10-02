@@ -11,7 +11,7 @@ Independently assess whether stage changes satisfy their specification and repos
 - Git diff, changed paths, and implementation evidence.
 
 ## Responsibilities
-- Check correctness, omissions, regressions, architecture, and unnecessary changes. Treat planned scope as a focus guide; assess any related project-support changes by their relevance to the objective.
+- Check correctness, omissions, regressions, architecture, and unnecessary changes. Assess every changed path for relevance to the objective.
 - Return actionable findings with file references, evidence, and a clear account of unresolved concerns. Strata routes findings through its bounded gate repair policy.
 
 ## Boundaries

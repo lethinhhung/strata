@@ -1,6 +1,5 @@
 import * as utils from './utils.js';
 import { RunError, RunRecord } from './types.js';
-import { inScope } from './helpers.js';
 
 export function checkpoint(repo: string, stage: any, config: any, record: any, file: string, attempt: number, stagedAtAttemptStart: string[] = []) {
   // Ensure record has all required fields
@@ -14,7 +13,7 @@ const defaultRecord: Partial<RunRecord> = {
      epic_path: '',
      epic_absolute_path: '',
      config: { worker:{}, strong:{}, workflow:{ max_repairs:0, review_repair_attempts:0, test_repair_attempts:0, validation_repair_attempts:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', memory_policy:'', test_commands:[], quality_checks:[], setup_commands:[], require_agent_gates:true }, path:undefined },
-     memory_consulted: { paths:[], excerpt:'' },
+     memory_consulted: { paths:[] },
      plan: undefined,
      updated_at: undefined,
      final_review: undefined,
@@ -32,13 +31,11 @@ const defaultRecord: Partial<RunRecord> = {
    });
   // Now record is guaranteed to have all fields of RunRecord
   const changed = utils.changes(new Map(), utils.runSnapshot(repo, record, file));
-  // A resumed run may share a worktree with changes left by earlier stages or
-  // made after the run began. Commit only this stage's planned or agent-reported
-  // paths and leave unrelated files untouched.
+  // A resumed run may share a worktree with unrelated changes. Commit only
+  // paths observed from this stage's agents and leave other paths untouched.
   const eligible = changed.filter((filePath: string) =>
     !filePath.startsWith('specs/') && !filePath.startsWith('docs/temps/') &&
-    (inScope(filePath, stage.scope ?? []) || (stage.accepted_paths ?? []).includes(filePath) ||
-      (stage.test_repair_paths ?? []).includes(filePath)));
+    ((stage.accepted_paths ?? []).includes(filePath) || (stage.test_repair_paths ?? []).includes(filePath)));
   if (config.workflow.checkpoint) {
     if (!eligible.length && !stage.checkpoint_commit) throw new RunError(`No files to checkpoint for stage ${stage.id}`);
     if (eligible.length) {

@@ -9,16 +9,16 @@ Prepare the implementation task, review focus, test task, and validation require
 Default: Codex. A project may select another configured provider and model.
 
 ## Inputs
-- Stage objective, scope, dependencies, and acceptance criteria.
+- Stage objective, dependencies, and acceptance criteria.
 - Project workflow and role definitions, repository context, and relevant decisions.
 - Agent findings and handoffs, changed paths, configured check output, prior repairs, and current run state.
 
 ## Responsibilities
-- Select only memory entries relevant to the stage and return them in `memory_handoff`; supply one concrete implementation task and useful review, test, and validation handoffs.
+- Inspect configured memory paths directly, select only entries relevant to the stage, and return them in `memory_handoff` with source paths; supply one concrete implementation task and useful review, test, and validation handoffs.
 - Give each specialist a focused handoff. Strata routes reported gate failures to an edit-capable worker and owns the cycle count and continuation decision.
 - Do not ask agents to rerun configured checks; Strata executes them and records authoritative results after test authoring and after repairs that change files.
 - Surface concrete blockers, missing user decisions, or external dependencies.
-- Treat planned stage scope as a focus guide. Authorize tightly related project configuration, package manifests, lockfiles, and integration files when required by the objective, and ensure the final review accounts for every changed path.
+- Keep assigned work focused on the objective. Include tightly related project configuration, package manifests, lockfiles, and integration files when required, and ensure final review accounts for every changed path.
 - Return concise task handoffs, relevant decisions, and any blockers known before implementation.
 
 ## Boundaries

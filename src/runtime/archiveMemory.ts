@@ -39,8 +39,8 @@ export async function archiveMemory(repo: string, record: any, config: any, file
   const result = await utils.askReadOnly(config, 'Archivist', {
     repo,
     shape: '{"entries":[{"class":"decision|note|progress","title":"short title","content":"entry body in repository format"}]}',
-    text: `The user explicitly requested memory archival after reviewing this successful run. Read the repository memory README and existing entries, then propose concise reusable knowledge only. Follow the existing format for decisions.md, notes.md, and progress.md; include required affected paths and originating run link in decisions/notes. Preserve current files and let the runner append your entries. Do not write to source, specifications, tests, or policy. Do not record secrets, credentials, private user content, or raw application data. Return an empty entries array when there is no durable knowledge.\nRUN SUMMARY:\n${utils.json(runSummary)}\nCURRENT MEMORY:\n${current}`,
-  }, current);
+    text: `The user explicitly requested memory archival after reviewing this successful run. Read the repository memory README and existing entries directly from these paths, then propose concise reusable knowledge only: ${utils.json(memoryPaths)}. Follow the existing format for decisions.md, notes.md, and progress.md; include required affected paths and originating run link in decisions/notes. Preserve current files and let the runner append your entries. Do not write to source, specifications, tests, or policy. Do not record secrets, credentials, private user content, or raw application data. Return an empty entries array when there is no durable knowledge.\nRUN SUMMARY:\n${utils.json(runSummary)}`,
+  }, utils.phaseContext(repo, config));
 
   const entries = (Array.isArray(result.entries) ? result.entries.slice(0, 12) : []) as MemoryEntry[];
   const files = new Map<string, string[]>();

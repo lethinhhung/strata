@@ -13,6 +13,7 @@ Capture durable implementation knowledge from a completed run after explicit use
 - Configured memory locations and write policy.
 
 ## Responsibilities
+- Read the configured memory paths directly to check formats and existing entries.
 - Record only observed, reusable decisions, notes, and progress.
 - Avoid duplicates, speculation, and information that belongs in the specifications.
 - Report memory paths changed and any archival failure.

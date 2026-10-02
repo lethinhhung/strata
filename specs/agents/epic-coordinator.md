@@ -11,16 +11,17 @@ Default: Codex. A project may select another configured provider and model.
 ## Inputs
 - Epic specification and acceptance criteria.
 - Target repository overview, project workflow instructions, and current run state.
-- Relevant active memory, if enabled and available.
+- Configured memory paths, if enabled; inspect relevant entries directly in the repository.
 - Completed stage reports, commits, and configured check results.
 
 ## Responsibilities
 - Read the target project's role definitions, conventions, and available quality commands before planning.
+- Read only relevant entries from configured memory paths. Treat memory as advisory and verify it against the current repository.
 - Resolve requirements with the user or make explicit assumptions where appropriate.
 - Make architectural and cross-stage decisions and define a dependency-aware stage plan with stable identities and completion criteria.
 - Delegate each stage to a Stage Coordinator with the full relevant contract and decisions.
-- Decompose the epic into ordered, single-concern logic and UI stages. Put logic before UI that consumes it and mark mechanical stages explicitly.
-- Keep each stage independently reviewable with a clear objective, dependencies, scope, completion criteria, and checkpoint identity.
+- Decompose the epic into ordered, single-concern stages. Keep logic distinct from user-facing UI work, and put logic before UI that consumes it.
+- Keep each stage independently reviewable with a clear objective, dependencies, completion criteria, and checkpoint identity. Include related production and test work in the same stage.
 - Plan completion around the sequential stage pipeline and checkpoints; Strata records unresolved gate findings when bounded repairs are exhausted.
 
 ## Boundaries

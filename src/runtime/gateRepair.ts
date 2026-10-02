@@ -24,7 +24,7 @@ export async function repairGate(repo: string, record: any, stage: any, config: 
     : 'Report the repair and any remaining findings before handing off.';
   const result = await agentStep(record, file, subtype, stage.id, () => utils.askScoped(config, agent, {
     repo,
-    text: `Repair the ${gate} issue (repair ${attempt}) using the findings and evidence below. The assigned edit agent may change any task-relevant project files; the original stage scope is context, not a file ownership boundary or repair limit. Preserve unrelated work, specs, memory, and run records. Fix the underlying cause; never weaken a test or hide a production defect. ${verifyInstruction}\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nRELEVANT MEMORY HANDOFF:\n${memoryHandoff || 'No relevant memory identified.'}\nROUTED TASK:\n${task}\nGATE FINDINGS:\n${utils.json(findings)}`,
+    text: `Repair the ${gate} issue (repair ${attempt}) using the findings and evidence below. The assigned edit agent may change any task-relevant project files. Preserve unrelated work, specs, memory, and run records. Fix the underlying cause; never weaken a test or hide a production defect. ${verifyInstruction}\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nRELEVANT MEMORY HANDOFF:\n${memoryHandoff || 'No relevant memory identified.'}\nROUTED TASK:\n${task}\nGATE FINDINGS:\n${utils.json(findings)}`,
   }, context, {
     allowedPath,
   }), role);
