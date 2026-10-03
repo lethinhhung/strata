@@ -3,6 +3,7 @@ import * as utils from './utils.js';
 import { runStageWithRepairs } from './runStageWithRepairs.js';
 import { archiveStageMemory } from './stageMemory.js';
 import { checkpoint } from './checkpoint.js';
+import { finalizeRun } from './finalizeRun.js';
 
 export async function executeRun(repo: string, record: any, config: any, file: string) {
   // Ensure record has all required fields
@@ -55,8 +56,7 @@ const defaultRecord: Partial<RunRecord> = {
       : stage.failure ?? '';
     await runStageWithRepairs(repo, record, stage, config, file, repairContext);
   }
-  // Stage gates and stage-N commits are the workflow's completion boundary.
-  // As in implement-huge-feature, there is no second epic-wide gate or tag.
+  if (config.workflow.checkpoint) record.pull_request = finalizeRun(repo, record);
   record.status = 'complete';
   record.completed_at = utils.now();
   record.progress.push({ type: 'run', subtype: 'complete', timestamp: utils.now() });
