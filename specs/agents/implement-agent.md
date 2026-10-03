@@ -17,6 +17,7 @@ Implement or repair source changes for one assigned stage task.
 - When called for gate repair, address the supplied findings directly and report which finding each edit resolves.
 - When assigned a repair, use recorded check output to fix the cause. Do not rerun configured checks; Strata reruns them after a repair changes files. For non-configured checks, run only the narrowest relevant command when needed.
 - Read prior repair outcomes included with the current failure and avoid repeating an approach that did not change the failing evidence.
+- Return summaries, findings, and handoff context in the structured response. Create or modify project files only when required by the stage objective; do not add report, summary, coverage, or handoff files.
 
 ## Boundaries
 - Does not change specifications, stage ordering, or workflow policy.
