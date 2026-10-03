@@ -36,6 +36,6 @@ export interface RunRecord {
   failure?: FailureDiagnostic; failure_history?: FailureDiagnostic[]; epic_checkpoint?: string; completed_at?: string;
   archival?: ArchivistResult; progress: ProgressEntry[]; created_at: string; repository: string; epic: string;
   epic_path: string; epic_absolute_path: string; config: Config; memory_consulted: MemoryConsulted; plan?: Plan;
-  updated_at?: string; final_review?: FinalReview; final_validation?: FinalValidation;
+  updated_at?: string; pull_request?: string; final_review?: FinalReview; final_validation?: FinalValidation;
   final_evidence?: CheckResult[]; final_validated_at?: string;
 }

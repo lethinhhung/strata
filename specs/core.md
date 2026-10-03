@@ -13,14 +13,14 @@ Strata owns orchestration mechanics and stage gates. Coordinators plan and prepa
 - Support multiple LLM providers through provider adapters. The current default is Codex for coordinators and OpenCode for agents.
 - Decompose work into single-concern logic and UI stages; run a bounded implementation, review, test, and validation pipeline for each.
 - Preserve workflow context, decisions, evidence, and resumable state.
-- Run project-defined checks, commit each stage with a `stage-N:` subject, and push it to `origin` as a checkpoint.
+- Run project-defined checks, commit each stage with a `stage-N:` subject, push it to `origin` as a checkpoint, and open a pull request after the run completes.
 
 ## 3. Non-Goals
 - Replacing the project's build, test, lint, typecheck, or other quality tools.
-- Opening a pull request or deploying the result.
+- Deploying the result.
 
 ## 4. Roles
-- **Strata CLI:** Loads configuration, invokes providers, runs configured checks, performs bounded repair cycles, records state, and commits and pushes completed stages.
+- **Strata CLI:** Loads configuration, invokes providers, runs configured checks, performs bounded repair cycles, records state, and commits and pushes stage checkpoints and completed run changes.
 - **Coordinator:** Run-level planning role. Creates the stage plan. The default provider is Codex. See [Coordinator role](agents/epic-coordinator.md).
 - **Stage Coordinator:** Prepares one stage's task handoff and review criteria. The runtime owns the fixed specialist sequence and gate loop. The default provider is Codex. See [Stage Coordinator role](agents/stage-coordinator.md).
 - **Agents:** Project-defined roles that perform exploration, implementation, review, testing, validation, or other project-specific work. Their definitions can add, remove, or combine roles to suit the project. The default provider is OpenCode. See [agent role specs](agents/).
@@ -50,9 +50,10 @@ Strata owns orchestration mechanics and stage gates. Coordinators plan and prepa
 - Repair limits are configured per gate and default to three cycles. A limit does not erase the finding: it is recorded in the stage report and surfaced in the run outcome.
 - A stage is complete only after its `stage-N:` commit exists. Push is attempted with retry and rebase; a failed rebase is aborted to restore the worktree and index before later stages continue. A push failure is recorded but does not prevent later stages. A stage commit failure halts the run.
 - Commit only the completed stage's changes, with an identifiable stage/checkpoint message. A commit failure leaves the stage incomplete and resumable.
+- After all stages complete, commit every remaining worktree change, push the branch, verify the worktree is clean, then create or reuse a GitHub pull request. A final commit, push, clean-tree verification, or pull-request failure leaves the run incomplete and resumable.
 
 ## 8. Run Completion and Memory
-- The run completes after every planned stage has reached its commit checkpoint. No pull request is opened.
+- The run completes after every planned stage has reached its checkpoint, remaining changes are committed and pushed, the worktree is clean, and a pull request is open.
 - After each completed stage checkpoint, Strata invokes the Archivist with that stage's results and writes validated decision, note, and progress entries under the configured memory directory. Writes are serialized before the next stage starts, so later stages can consult them. Archival is not a gate; failures are recorded and retried when resuming. `strata archive RUN_ID` remains available to archive a previously completed run or retry archival manually.
 
 ## 9. Providers and Runtime
