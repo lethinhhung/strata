@@ -13,6 +13,7 @@ Independently assess whether stage changes satisfy their specification and repos
 ## Responsibilities
 - Check correctness, omissions, regressions, architecture, and unnecessary changes. Assess every changed path for relevance to the objective.
 - Return actionable findings with file references, evidence, and a clear account of unresolved concerns. Strata routes findings through its bounded gate repair policy.
+- Return review findings in the structured response; do not create report or summary files.
 
 ## Boundaries
 - Read-only; does not fix files or waive requirements.

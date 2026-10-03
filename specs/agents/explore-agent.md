@@ -14,6 +14,7 @@ Gather repository context needed to plan a bounded stage task.
 - Locate relevant files, APIs, tests, conventions, and dependencies.
 - Report concise findings with file references and uncertainties.
 - Identify missing information without inventing requirements.
+- Return findings and context in the structured response; do not create files.
 
 ## Boundaries
 - Read-only; does not modify files or make architectural decisions.
