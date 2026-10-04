@@ -48,13 +48,13 @@ test('failed test and review gates are recorded',async()=>{
     const cmd = path.join(repo,'agent');
     agent(cmd);
     const r = record(repo,'gate');
-    await executeRun(repo,r,config(cmd,[['node','-e','process.exit(1)']]),path.join(repo,'docs/temps/run.md'));
+    await assert.rejects(executeRun(repo,r,config(cmd,[['node','-e','process.exit(1)']]),path.join(repo,'docs/temps/run.md')));
     assert.ok(r.progress.some(x=>x.type==='gate'&&x.subtype==='test'&&!x.passed)); assert.ok(r.stages[0].open_issues?.some(issue => issue.includes('failed')));
     fs.rmSync(path.join(repo, 'src/work.ts')); const review=record(repo,'review');
     agent(cmd,'Review Agent');
-    await executeRun(repo,review,config(cmd),path.join(repo,'docs/temps/review.md'));
+    await assert.rejects(executeRun(repo,review,config(cmd),path.join(repo,'docs/temps/review.md')));
     assert.ok(review.progress.some(x=>x.type==='gate'&&x.subtype==='review'&&!x.passed));
-    assert.equal(review.status, 'complete');
+    assert.equal(review.stages[0].status, 'failed');
   });
 });
 test('resume preserves prior failure after a new failure',async()=>{

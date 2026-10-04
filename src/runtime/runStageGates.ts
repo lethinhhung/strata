@@ -30,7 +30,8 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
   const runTests = () => coordination.run_tests === false
     ? Promise.resolve({ result: { status: 'skipped', findings: [] }, violations: [] })
     : createTests({ repo, record, stage, config, file, context, coordination, setupEvidence });
-  // Avoid concurrent writes when the implementer already touched test files.
+  // These agents share the run record; run sequentially to avoid snapshot restoration
+  // treating the other agent's record update as a project edit.
   if (sourcePaths.some(isTestPath)) {
     testAgent = await runTests();
     review = await runReview();
@@ -38,7 +39,8 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
     review = await runReview();
     testAgent = { result: priorTest.result, violations: priorTest.scope_violations ?? [] };
   } else {
-    [review, testAgent] = await Promise.all([runReview(), runTests()]);
+    testAgent = await runTests();
+    review = await runReview();
   }
   let evidence = [...setupEvidence, ...runChecks(repo, checks)];
   recordCheckGate(record, stage, file, evidence);
