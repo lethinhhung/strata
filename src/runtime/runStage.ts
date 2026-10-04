@@ -6,23 +6,28 @@ import { implementationCanProceed } from './implementationResult.js';
 import { agentStep } from './agentStep.js';
 import { canEditProjectPath } from './editPolicy.js';
 
-export async function runStage(repo: string, record: any, stage: any, config: any, file: string, { repairContext = '' } = {}) {
+export async function runStage(repo: string, record: any, stage: any, config: any, file: string, { repairContext = '', light = false, repairRound = 1 } = {}) {
   stage.status = 'in_progress';
   record.progress.push({ type: 'stage', subtype: 'in_progress', stage_id: stage.id, timestamp: utils.now() });
   utils.save(record, file);
   const specContext = utils.phaseContext(repo, config);
-  const beforeExplore = utils.runSnapshot(repo, record, file);
-  const exploration = await agentStep(record, file, 'explore', stage.id, () => utils.askReadOnly(config, 'Explore Agent', {
-    repo,
-    shape: '{"status":"pass|fail","findings":[],"files":[],"summary":"...","uncertainties":[]}',
-    text: `Read-only repository investigation for this stage. Locate relevant files, conventions, tests, APIs, and dependencies. Do not edit files or decide architecture. The Stage Coordinator will inspect configured advisory memory as needed.\nSTAGE CONTRACT:\n${utils.json(helpers.stageContract(stage))}`,
-  }, specContext, {}));
-  const afterExplore = utils.runSnapshot(repo, record, file);
-  const explorationMutation = utils.changes(beforeExplore, afterExplore);
-  helpers.addPhase(stage, 'explore', exploration, { observed_changed_paths: explorationMutation }); utils.save(record, file);
-  if (explorationMutation.length) throw new RunError(`Explore Agent modified files: ${explorationMutation.join(', ')}`);
+  let exploration: any = stage.phase_results.find((phase: any) => phase.phase === 'explore')?.result;
+  if (!light || !exploration) {
+    const beforeExplore = utils.runSnapshot(repo, record, file);
+    exploration = await agentStep(record, file, 'explore', stage.id, () => utils.askReadOnly(config, 'Explore Agent', {
+      repo,
+      shape: '{"status":"pass|fail","findings":[],"files":[],"summary":"...","uncertainties":[]}',
+      text: `Read-only repository investigation for this stage. Locate relevant files, conventions, tests, APIs, and dependencies. Do not edit files or decide architecture. The Stage Coordinator will inspect configured advisory memory as needed.\nSTAGE CONTRACT:\n${utils.json(helpers.stageContract(stage))}`,
+    }, specContext, {}));
+    const afterExplore = utils.runSnapshot(repo, record, file);
+    const explorationMutation = utils.changes(beforeExplore, afterExplore);
+    helpers.addPhase(stage, 'explore', exploration, { observed_changed_paths: explorationMutation }); utils.save(record, file);
+    if (explorationMutation.length) throw new RunError(`Explore Agent modified files: ${explorationMutation.join(', ')}`);
+  }
 
-  const coordination = await agentStep(record, file, 'stage_coordinator', stage.id, () => utils.askReadOnly(config, 'Stage Coordinator', {
+  let coordination: any = light ? [...stage.phase_results].reverse().find((phase: any) => phase.phase === 'stage_coordination')?.result : undefined;
+  const reusedCoordination = Boolean(coordination);
+  if (!coordination) coordination = await agentStep(record, file, 'stage_coordinator', stage.id, () => utils.askReadOnly(config, 'Stage Coordinator', {
     repo,
     shape: '{"implementation_task":"...","review_focus":[],"test_task":"...","validation_requirements":[],"memory_handoff":"..."}',
     text: `Coordinate this stage with a fresh context. Do not implement. Follow project role definitions and acceptance criteria. The runner implements first, then performs review and test authoring in parallel, runs configured checks, and validates the resulting tree. Do not skip a specialist or replace the pipeline with custom agent_tasks. Keep work directly relevant to the stage objective. Inspect configured advisory memory paths directly when useful, verify relevant entries against the current repository, and return a concise memory_handoff with source paths for implementation, review, test, validation, and repair agents. Give the implementer one concrete task, then provide review focus, test task, validation requirements, and project-appropriate handoffs. Include prior repair findings. Pass summaries, findings, and handoff context in structured results and the run record; agents must not create extra report, summary, coverage, or handoff files. Require project files only when the stage contract calls for them. Treat prior agent reports and run history as claims, not repository facts: verify paths, package roots, scripts, and test inventory in the current repository before assigning work. Never infer that an agent-created or untracked path is an intended project package or existing test. Do not create new project roots or broaden the workspace to satisfy a path mentioned only in prior agent output.\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nEXPLORE FINDINGS:\n${utils.json(exploration)}\nCONFIGURED MEMORY PATHS:\n${utils.json(record.memory_consulted.paths)}\nPRIOR RESULTS:\n${utils.json(stage.phase_results)}\nREPAIR FINDINGS:\n${repairContext}`,
@@ -30,7 +35,7 @@ export async function runStage(repo: string, record: any, stage: any, config: an
   coordination.run_review = true;
   coordination.run_tests = true;
   coordination.run_validation = true;
-  helpers.addPhase(stage, 'stage_coordination', coordination);
+  if (!reusedCoordination) helpers.addPhase(stage, 'stage_coordination', coordination);
   utils.save(record, file);
 
   const beforeImplement = utils.runSnapshot(repo, record, file);
@@ -65,6 +70,6 @@ export async function runStage(repo: string, record: any, stage: any, config: an
   if (!implementationCanProceed(implementation.status, false, effectiveImplementChanges, Boolean(repairContext))) {
     return { passed: false, reason: 'Stage agents reported no changes relevant to the stage', findings: implementation.findings ?? implementation.handoffs ?? [] };
   }
-  return runStageGates(repo, record, stage, config, file, specContext, coordination, repairContext,
+  return runStageGates(repo, record, stage, config, file, specContext, coordination, repairContext, repairRound,
     implementation, implementationAttempt, implementChanges, effectiveImplementChanges);
 }

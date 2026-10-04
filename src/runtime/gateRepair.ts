@@ -6,12 +6,12 @@ import { canEditProjectPath } from './editPolicy.js';
 import { workflowChecks } from './checks.js';
 
 export async function repairGate(repo: string, record: any, stage: any, config: any, file: string,
-  context: string, role: string, gate: string, findings: unknown, task = '', memoryHandoff = '') {
+  context: string, role: string, gate: string, findings: unknown, task = '', memoryHandoff = '', round = 1) {
   const agent = role === 'implementation' ? 'Implement Agent' : role === 'tests' ? 'Test Agent' : role;
   const phase = role === 'implementation' ? 'implement_repair' : role === 'tests' ? 'test_repair' : `repair_${role.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
   const subtype: 'implement' | 'test' | 'custom' = role === 'implementation' ? 'implement' : role === 'tests' ? 'test' : 'custom';
   const attempt = record.events.filter((event: any) => event.type === 'repair' && event.stage_id === stage.id && event.details?.gate === gate).length + 1;
-  record.events.push({ type: 'repair', stage_id: stage.id, attempt, details: { gate, role, findings }, at: utils.now() });
+  record.events.push({ type: 'repair', stage_id: stage.id, attempt, details: { gate, role, findings, round }, at: utils.now() });
   const before = utils.runSnapshot(repo, record, file);
   const allowedPath = (target: string) => canEditProjectPath(target, repo, record, file);
   const hasTestCommand = workflowChecks(config.workflow).some((check: any) => check.kind === 'test');

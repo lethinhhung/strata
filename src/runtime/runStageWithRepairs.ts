@@ -44,6 +44,8 @@ const defaultRecord: Partial<RunRecord> = {
     try {
       result = await runStage(repo, record, stage, config, file, {
         repairContext,
+        light: attemptIndex > 1,
+        repairRound: attemptIndex,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -56,6 +58,7 @@ const defaultRecord: Partial<RunRecord> = {
     record.attempts.push(attempt);
     utils.save(record, file);
     if (result.passed) {
+      delete stage.open_issues;
       stage.status = 'complete';
       await archiveStageMemory(repo, record, stage, config, file);
       checkpoint(repo, stage, config, record, file, attemptIndex, stagedBeforeStage);
@@ -64,6 +67,9 @@ const defaultRecord: Partial<RunRecord> = {
       utils.save(record, file);
       return;
     }
+    stage.open_issues = Array.isArray(result.findings?.open_issues)
+      ? result.findings.open_issues
+      : [result.reason, ...Object.values(result.findings ?? {}).flatMap((value: any) => value?.findings ?? [])].filter(Boolean).map(String);
     if (result.blocked) break;
     // max_repairs counts retries after the initial stage pass.
     if (attemptIndex > (config.workflow.max_repairs ?? 2)) break;
@@ -81,6 +87,7 @@ const defaultRecord: Partial<RunRecord> = {
   }
   stage.status = 'failed';
   stage.failure = record.attempts.slice(-1)[0]?.reason;
+  if (!stage.open_issues?.length) stage.open_issues = record.attempts.slice(-1)[0]?.findings ?? [];
   record.progress.push({ type: 'stage', subtype: 'fail', stage_id: stage.id, timestamp: utils.now() });
   utils.save(record, file);
   throw new RunError(`Stage ${stage.id} halted: ${stage.failure}`);
