@@ -12,6 +12,7 @@ Provide a read-only assessment of stage coverage and project-defined checks usin
 ## Responsibilities
 - Assess requirement coverage and applicable project checks under the target project's conventions. Do not rerun commands; Strata supplies recorded engine evidence.
 - Report observations, remaining concerns, and supplied command evidence to Strata.
+- Return the assessment in the structured response; do not create reports, summaries, or other files.
 
 ## Boundaries
 - Read-only by default; a project may assign follow-up work through a separate role or explicitly broaden this role.

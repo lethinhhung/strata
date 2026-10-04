@@ -11,7 +11,7 @@ import { isTestPath } from './testPath.js';
  * validation. The runtime routes gate failures directly to a repair agent.
  */
 export async function runStageGates(repo: string, record: any, stage: any, config: any, file: string,
-  context: string, coordination: any, _repairContext: string, _implementation: any,
+  context: string, coordination: any, _repairContext: string, repairRound: number, _implementation: any,
   _implementationAttempt: any, _implementChanges: string[], sourceChanges: string[]) {
   const sourcePaths = [...sourceChanges];
   const checks = workflowChecks(config.workflow);
@@ -23,18 +23,24 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
   let setupEvidence = runChecks(repo, setup, 'setup');
   let review: any;
   let testAgent: any;
+  const priorTest = [...stage.phase_results].reverse().find((phase: any) => phase.phase === 'test');
   const runReview = () => coordination.run_review === false
     ? Promise.resolve({ review: { status: 'skipped', findings: [] }, passed: true })
     : reviewStage(reviewArgs);
   const runTests = () => coordination.run_tests === false
     ? Promise.resolve({ result: { status: 'skipped', findings: [] }, violations: [] })
     : createTests({ repo, record, stage, config, file, context, coordination, setupEvidence });
-  // Avoid concurrent writes when the implementer already touched test files.
+  // These agents share the run record; run sequentially to avoid snapshot restoration
+  // treating the other agent's record update as a project edit.
   if (sourcePaths.some(isTestPath)) {
     testAgent = await runTests();
     review = await runReview();
+  } else if (repairRound > 1 && priorTest) {
+    review = await runReview();
+    testAgent = { result: priorTest.result, violations: priorTest.scope_violations ?? [] };
   } else {
-    [review, testAgent] = await Promise.all([runReview(), runTests()]);
+    testAgent = await runTests();
+    review = await runReview();
   }
   let evidence = [...setupEvidence, ...runChecks(repo, checks)];
   recordCheckGate(record, stage, file, evidence);
@@ -50,8 +56,8 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
     }
     const gate = failedChecks.length || testFailed ? 'test' : review.passed === false ? 'review' : 'validation';
     const limitKey = gate === 'test' ? 'test_repair_attempts' : gate === 'review' ? 'review_repair_attempts' : 'validation_repair_attempts';
-    const repairCount = record.events.filter((event: any) => event.type === 'repair' && event.stage_id === stage.id && event.details?.gate === gate).length;
-    const limit = config.workflow[limitKey] ?? 3;
+    const repairCount = record.events.filter((event: any) => event.type === 'repair' && event.stage_id === stage.id && event.details?.gate === gate && event.details?.round === repairRound).length;
+    const limit = repairRound > 1 ? 1 : config.workflow[limitKey] ?? 3;
     if (repairCount >= limit) {
       const openIssues = [
         ...(review.review.findings ?? []).filter(() => review.passed === false).map((finding: any) => `Review: ${typeof finding === 'string' ? finding : JSON.stringify(finding)}`),
@@ -63,7 +69,7 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
         ...(!validation.passed && !(validation.validation.findings ?? []).length ? ['Validation did not pass; no actionable finding was returned.'] : []),
       ].filter(Boolean);
       stage.open_issues = [...new Set(openIssues)];
-      return { passed: true, reason: 'Repair cycle limit reached; committing with unresolved findings recorded', findings: { review: review.review, tester: testAgent.result, validation: validation.validation, evidence, open_issues: stage.open_issues } };
+      return { passed: false, reason: `Repair cycle limit reached for ${gate}; stage remains open`, findings: { review: review.review, tester: testAgent.result, validation: validation.validation, evidence, open_issues: stage.open_issues } };
     }
     const routedFindings = {
       review: review.review,
@@ -77,7 +83,7 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
     const role = testAgentOnlyFailure ? 'tests' : 'implementation';
     const repairTask = `Fix the ${gate} findings using the evidence above. Preserve passing requirements. Do not rerun project commands; Strata reruns configured checks after a repair changes files.`;
     const repaired = await repairGate(repo, record, stage, config, file, context, role,
-      gate, routedFindings, repairTask, coordination.memory_handoff ?? '');
+      gate, routedFindings, repairTask, coordination.memory_handoff ?? '', repairRound);
     stage.accepted_paths = [...new Set([...(stage.accepted_paths ?? []), ...repaired.changed])];
     if (role !== 'tests') {
       for (const target of repaired.changed) if (!sourcePaths.includes(target)) sourcePaths.push(target);

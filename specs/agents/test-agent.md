@@ -14,9 +14,10 @@ Create deterministic tests for behavior required by one stage. Strata runs confi
 - Inspect the configured test commands and avoid running them when Strata will run them for this stage. If no test command is configured, run the narrowest relevant project test command available.
 - When assigned a repair, fix only test-file issues. Strata reruns configured checks after the repair and records their results.
 - Read prior repair outcomes included with the current failure and avoid repeating an approach that did not change the failing evidence.
+- Return test results, coverage notes, and handoff context in the structured response. Do not create summary, report, coverage, or handoff files unless the stage contract explicitly requires one.
 
 ## Boundaries
-- Focus on test files. May modify related project files when the task or test evidence requires it; keep changes relevant to the stage.
+- Focus on test files. Modify related project files only when the task or test evidence requires them; create no extra project artifacts.
 - Reports missing or unavailable project checks accurately; does not claim they passed.
 - Does not alter production code to make a test pass.
 
