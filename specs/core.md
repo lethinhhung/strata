@@ -51,7 +51,7 @@ Strata owns orchestration mechanics and stage gates. Coordinators plan and prepa
 - Repair limits are configured per gate and default to three cycles. A limit does not erase the finding: it is recorded in the stage report and surfaced in the run outcome.
 - A stage is complete only after its `stage-N:` commit exists. Push is attempted with retry and rebase; a failed rebase is aborted to restore the worktree and index before later stages continue. A push failure is recorded but does not prevent later stages. A stage commit failure halts the run.
 - Commit only the completed stage's changes, with an identifiable stage/checkpoint message. A commit failure leaves the stage incomplete and resumable.
-- After all stages complete, commit every remaining worktree change, push the branch, verify the worktree is clean, then create or reuse a GitHub pull request. A final commit, push, clean-tree verification, or pull-request failure leaves the run incomplete and resumable.
+- After all stages complete, commit every remaining worktree change, push the branch, verify the worktree is clean, then create or reuse a GitHub pull request. Record the pull-request URL and completed status in the run record, commit and push that update, and verify the worktree is clean again. Any failure in this sequence leaves the run incomplete and resumable.
 
 ## 8. Run Completion and Memory
 - The run completes after every planned stage has reached its checkpoint, remaining changes are committed and pushed, the worktree is clean, and a pull request is open.
