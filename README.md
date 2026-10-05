@@ -17,7 +17,7 @@ npm link
 strata init
 ```
 
-Strata runs in the repository selected by `--repo`, on the current branch or a branch selected with `--branch`. It refuses the default branch and requires a clean worktree apart from Strata config and the selected epic input. Each completed stage is committed as `stage-N: ...` and pushed to `origin`; push failures are recorded while later stages continue. Once all stages finish, Strata commits remaining changes, pushes the complete branch, verifies the worktree is clean, and opens or reuses a GitHub pull request with `gh`.
+Strata runs in the repository selected by `--repo`, on the current branch or a branch selected with `--branch`. It refuses the default branch and requires a clean worktree apart from Strata config and the selected epic input. Each completed stage is committed as `stage-N: ...` and pushed to `origin`; push failures are recorded while later stages continue. Once all stages finish, Strata commits remaining changes, pushes the complete branch, verifies the worktree is clean, and opens or reuses a GitHub pull request with `gh`. It then records the pull-request URL and completed status, commits and pushes that update, and confirms the worktree is clean before returning success.
 
 ## Configure
 

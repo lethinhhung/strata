@@ -56,7 +56,10 @@ const defaultRecord: Partial<RunRecord> = {
       : stage.failure ?? '';
     await runStageWithRepairs(repo, record, stage, config, file, repairContext);
   }
-  if (config.workflow.checkpoint) record.pull_request = finalizeRun(repo, record);
+  if (config.workflow.checkpoint) {
+    finalizeRun(repo, record, file);
+    return;
+  }
   record.status = 'complete';
   record.completed_at = utils.now();
   record.progress.push({ type: 'run', subtype: 'complete', timestamp: utils.now() });
