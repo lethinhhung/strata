@@ -81,7 +81,12 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
     };
     const testAgentOnlyFailure = gate === 'test' && !failedChecks.length;
     const role = testAgentOnlyFailure ? 'tests' : 'implementation';
-    const repairTask = `Fix the ${gate} findings using the evidence above. Preserve passing requirements. Do not rerun project commands; Strata reruns configured checks after a repair changes files.`;
+    const failedCheckSummary = failedChecks.map((check: any) =>
+      `${check.kind} check ${check.id}: ${check.command.join(' ')} (exit ${check.exit_code ?? 'unavailable'})`,
+    ).join('\n');
+    const repairTask = `Fix the ${gate} findings using the evidence above. ${failedChecks.length
+      ? `The failed configured checks are:\n${failedCheckSummary}\nTreat test failures as regression evidence and quality checks (such as lint, typecheck, or build) as separate requirements. Fix the underlying source or test cause without weakening coverage or hiding a defect.`
+      : ''} Preserve passing requirements. Do not rerun project commands; Strata reruns the complete configured check set after a repair changes files.`;
     const repaired = await repairGate(repo, record, stage, config, file, context, role,
       gate, routedFindings, repairTask, coordination.memory_handoff ?? '', repairRound);
     stage.accepted_paths = [...new Set([...(stage.accepted_paths ?? []), ...repaired.changed])];
