@@ -15,11 +15,13 @@ export async function repairGate(repo: string, record: any, stage: any, config: 
   const before = utils.runSnapshot(repo, record, file);
   const allowedPath = (target: string) => canEditProjectPath(target, repo, record, file);
   const hasTestCommand = workflowChecks(config.workflow).some((check: any) => check.kind === 'test');
-  const verifyInstruction = gate === 'test'
-    ? hasTestCommand
-      ? 'Do not rerun configured project checks. Fix the reported cause using the recorded evidence; Strata will rerun configured checks once after your repair.'
-      : 'Fix the reported test issue, then run the narrowest relevant test command available. Do not run the repository-wide suite unless necessary.'
-    : 'Report the repair and any remaining findings before handing off.';
+  const verifyInstruction = agent === 'Implement Agent'
+    ? 'Use recorded check output to diagnose and fix the reported cause. Run focused tests or quality checks when they help verify your repair; avoid rerunning the full configured suite unless needed. Strata reruns configured checks after your repair and records the authoritative gate results.'
+    : agent === 'Test Agent' && gate === 'test'
+      ? 'Fix the reported test issue and run a focused relevant test when useful. Avoid rerunning the full configured suite unless needed; Strata reruns configured checks and records the authoritative gate results.'
+      : gate === 'test' && !hasTestCommand
+        ? 'Fix the reported test issue, then run the narrowest relevant test command available. Do not run the repository-wide suite unless necessary.'
+      : 'Report the repair and any remaining findings before handing off. Strata reruns configured checks after your repair and records their results.';
   const result = await agentStep(record, file, subtype, stage.id, () => utils.askScoped(config, agent, {
     repo,
     text: `Repair the ${gate} issue (repair ${attempt}) using the findings and evidence below. The assigned edit agent may change task-relevant project files needed to satisfy a stage deliverable. Do not create report, summary, coverage, or handoff files; return that context in your structured response. Preserve unrelated work, specs, memory, and run records. Fix the underlying cause; never weaken a test or hide a production defect. ${verifyInstruction}\nCONTRACT:\n${utils.json(helpers.stageContract(stage))}\nRELEVANT MEMORY HANDOFF:\n${memoryHandoff || 'No relevant memory identified.'}\nROUTED TASK:\n${task}\nGATE FINDINGS:\n${utils.json(findings)}`,
