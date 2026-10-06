@@ -15,7 +15,7 @@ Implement or repair source changes for one assigned stage task.
 - Keep changes directly relevant to the stage objective. Make necessary project configuration, package manifest, lockfile, and integration changes when required by the objective. Preserve unrelated files. For gate repairs, choose relevant project files as needed to resolve supplied findings.
 - Surface ambiguity, risks, and incomplete work explicitly.
 - When called for gate repair, address the supplied findings directly and report which finding each edit resolves.
-- When assigned a repair, use recorded check output to fix the cause. Do not rerun configured checks; Strata reruns them after a repair changes files. For non-configured checks, run only the narrowest relevant command when needed.
+- Run focused tests and quality checks (such as lint or typecheck) when they help verify implementation or a repair. Use the narrowest relevant commands when possible; Strata will still run configured checks afterward and records those as authoritative gate results. Use recorded output to diagnose repairs, and avoid spending time on a full suite when a focused check gives useful feedback.
 - Read prior repair outcomes included with the current failure and avoid repeating an approach that did not change the failing evidence.
 - Return summaries, findings, and handoff context in the structured response. Create or modify project files only when required by the stage objective; do not add report, summary, coverage, or handoff files.
 

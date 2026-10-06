@@ -11,7 +11,7 @@ Create deterministic tests for behavior required by one stage. Strata runs confi
 
 ## Responsibilities
 - Add deterministic coverage for required behavior and observable effects.
-- Inspect the configured test commands and avoid running them when Strata will run them for this stage. If no test command is configured, run the narrowest relevant project test command available.
+- Run a focused relevant test when useful to verify authored tests. Avoid duplicating the full configured suite unless the stage requires it; Strata runs configured checks after test authoring and records authoritative gate results.
 - When assigned a repair, fix only test-file issues. Strata reruns configured checks after the repair and records their results.
 - Read prior repair outcomes included with the current failure and avoid repeating an approach that did not change the failing evidence.
 - Return test results, coverage notes, and handoff context in the structured response. Do not create summary, report, coverage, or handoff files unless the stage contract explicitly requires one.
