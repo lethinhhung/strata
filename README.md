@@ -37,7 +37,7 @@ Configure project checks with `workflow.checks` when needed. Otherwise, Strata d
 
 Checks run sequentially by default, preserving command order. Set `workflow.check_concurrency` to an integer from 2 to 8 to run independent checks concurrently; only do this when the configured commands do not depend on one another or compete over generated files. Each check records its duration in run evidence.
 
-Each stage follows implementation → review → test → validation. A bounded repair loop routes findings back to an agent; if the configured repair limit is reached, Strata commits the stage with unresolved findings recorded. A concrete blocker or commit failure halts the run and leaves its record resumable. UI stages use the `Screen Implementer` role; logic stages use `Implement Agent`.
+Each stage follows implementation → review → test → validation. The Stage Coordinator may split implementation into ordered tasks, such as backend work followed by dependent UI work; Strata invokes each assigned specialist sequentially before the stage gates. A bounded repair loop routes findings back to an agent; if the configured repair limit is reached, Strata commits the stage with unresolved findings recorded. A concrete blocker or commit failure halts the run and leaves its record resumable. UI tasks use the `Screen Implementer` role; logic tasks use `Implement Agent`.
 
 ## Run an epic
 
