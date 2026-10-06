@@ -20,7 +20,8 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
     repo, record, stage, config, file, context, coordination, sourceChanges: sourcePaths,
   };
 
-  let setupEvidence = runChecks(repo, setup, 'setup');
+  const runConfiguredChecks = (items: any[], prefix = '') => runChecks(repo, items, prefix, config.workflow.check_concurrency ?? 1);
+  let setupEvidence = await runConfiguredChecks(setup, 'setup');
   let review: any;
   let testAgent: any;
   const priorTest = [...stage.phase_results].reverse().find((phase: any) => phase.phase === 'test');
@@ -42,7 +43,7 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
     testAgent = await runTests();
     review = await runReview();
   }
-  let evidence = [...setupEvidence, ...runChecks(repo, checks)];
+  let evidence = [...setupEvidence, ...await runConfiguredChecks(checks)];
   recordCheckGate(record, stage, file, evidence);
 
   while (true) {
@@ -97,9 +98,9 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
     }
 
     const changed = repaired.changed;
-    if (changed.some(isDependencyPath)) setupEvidence = runChecks(repo, setup, 'setup');
+    if (changed.some(isDependencyPath)) setupEvidence = await runConfiguredChecks(setup, 'setup');
     if (changed.length) {
-      evidence = [...setupEvidence, ...runChecks(repo, checks)];
+      evidence = [...setupEvidence, ...await runConfiguredChecks(checks)];
       recordCheckGate(record, stage, file, evidence);
       for (const target of changed) if (!sourcePaths.includes(target)) sourcePaths.push(target);
       review = coordination.run_review === false
