@@ -23,7 +23,7 @@ const defaultRecord: Partial<RunRecord> = {
       epic: '',
       epic_path: '',
       epic_absolute_path: '',
-      config: { worker:{}, strong:{}, workflow:{ max_repairs:0, review_repair_attempts:0, test_repair_attempts:0, validation_repair_attempts:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', memory_policy:'', test_commands:[], quality_checks:[], setup_commands:[], require_agent_gates:true }, path:undefined },
+      config: { worker:{}, strong:{}, workflow:{ max_repairs:0, review_repair_attempts:0, test_repair_attempts:0, validation_repair_attempts:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', memory_policy:'', test_commands:[], quality_checks:[], setup_commands:[], require_agent_gates:true, check_concurrency:1 }, path:undefined },
       memory_consulted: { paths:[] },
       plan: undefined,
       updated_at: undefined,

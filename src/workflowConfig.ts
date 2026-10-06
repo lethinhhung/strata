@@ -12,6 +12,7 @@ export interface Workflow {
   test_commands: string[][];
   setup_commands: string[][];
   require_agent_gates: boolean;
+  check_concurrency: number;
   checks?: WorkflowCheck[];
 }
 
@@ -40,11 +41,15 @@ export function loadWorkflow(raw: Partial<Workflow> = {}): Workflow {
     test_commands: tests,
     setup_commands: commandList(raw.setup_commands),
     require_agent_gates: typeof raw.require_agent_gates === 'boolean' ? raw.require_agent_gates : true,
+    check_concurrency: typeof raw.check_concurrency === 'number' ? raw.check_concurrency : 1,
     checks: configuredChecks(raw.checks, tests, quality),
   };
   if (!Number.isInteger(workflow.max_repairs) || workflow.max_repairs < 0) throw new Error('workflow.max_repairs must be a non-negative integer');
   for (const key of ['review_repair_attempts', 'test_repair_attempts', 'validation_repair_attempts'] as const) {
     if (!Number.isInteger(workflow[key]) || workflow[key] < 0) throw new Error(`workflow.${key} must be a non-negative integer`);
+  }
+  if (!Number.isInteger(workflow.check_concurrency) || workflow.check_concurrency < 1 || workflow.check_concurrency > 8) {
+    throw new Error('workflow.check_concurrency must be an integer from 1 to 8');
   }
   if (!workflow.checkpoint) throw new Error('workflow.checkpoint must be true; stage and epic checkpoints are required by specs/core.md');
   return workflow;

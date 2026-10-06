@@ -35,6 +35,8 @@ Role tables also support `extra_args` and `instructions_path`. Role names use lo
 
 Configure project checks with `workflow.checks` when needed. Otherwise, Strata discovers `test:ci` (or `test`), `lint`, `typecheck`, and `build` scripts in the target `package.json`; the package manager comes from the lockfile. Missing scripts are not invented. Commands run from the target repository and their output is included in the agent handoff.
 
+Checks run sequentially by default, preserving command order. Set `workflow.check_concurrency` to an integer from 2 to 8 to run independent checks concurrently; only do this when the configured commands do not depend on one another or compete over generated files. Each check records its duration in run evidence.
+
 Each stage follows implementation → review → test → validation. A bounded repair loop routes findings back to an agent; if the configured repair limit is reached, Strata commits the stage with unresolved findings recorded. A concrete blocker or commit failure halts the run and leaves its record resumable. UI stages use the `Screen Implementer` role; logic stages use `Implement Agent`.
 
 ## Run an epic

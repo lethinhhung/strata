@@ -14,7 +14,7 @@ const defaultRecord: Partial<RunRecord> = {
      epic: '',
      epic_path: '',
      epic_absolute_path: '',
-     config: { worker:{}, strong:{}, workflow:{ max_repairs:0, review_repair_attempts:0, test_repair_attempts:0, validation_repair_attempts:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', memory_policy:'', test_commands:[], quality_checks:[], setup_commands:[], require_agent_gates:true }, path:undefined },
+     config: { worker:{}, strong:{}, workflow:{ max_repairs:0, review_repair_attempts:0, test_repair_attempts:0, validation_repair_attempts:0, checkpoint:false, checkpoint_prefix:'', spec_paths:[], memory_path:'', memory_policy:'', test_commands:[], quality_checks:[], setup_commands:[], require_agent_gates:true, check_concurrency:1 }, path:undefined },
      memory_consulted: { paths:[] },
      plan: undefined,
      updated_at: undefined,
@@ -39,7 +39,11 @@ const defaultRecord: Partial<RunRecord> = {
     text: `Review epic criteria, cross-stage consistency, regressions, and architecture. Check the latest completed result for each stage. Earlier failed attempts are resolved when followed by a passing attempt and checkpoint; do not treat historical attempts as current failures. The target repository and its Git metadata are available, but do not change files. Use recorded observed changed paths, completed phase results, checkpoint identity, and engine check evidence to assess the work. Return a target_stage_id only for a substantive unresolved issue in completed work.\nEPIC:\n${record.epic}\nSTAGE RESULTS:\n${utils.json(record.stages)}`,
   }, context, { strong: true }));
   const checks = workflowChecks(config.workflow);
-  const evidence = [...runChecks(repo, setupChecks(config.workflow), 'setup'), ...runChecks(repo, checks, 'final')];
+  const concurrency = config.workflow.check_concurrency ?? 1;
+  const evidence = [
+    ...await runChecks(repo, setupChecks(config.workflow), 'setup', concurrency),
+    ...await runChecks(repo, checks, 'final', concurrency),
+  ];
   const beforeValidator = utils.runSnapshot(repo, record, file);
   const validator = await agentStep(record, file, 'validate', 'epic', () => utils.askReadOnly(config, 'Validate Agent', {
     repo,
