@@ -87,7 +87,7 @@ export async function runStageGates(repo: string, record: any, stage: any, confi
     ).join('\n');
     const repairTask = `Fix the ${gate} findings using the evidence above. ${failedChecks.length
       ? `The failed configured checks are:\n${failedCheckSummary}\nTreat test failures as regression evidence and quality checks (such as lint, typecheck, or build) as separate requirements. Fix the underlying source or test cause without weakening coverage or hiding a defect.`
-      : ''} Preserve passing requirements. Do not rerun project commands; Strata reruns the complete configured check set after a repair changes files.`;
+      : ''} Preserve passing requirements. Run focused tests or checks when useful to verify a repair, and prefer the narrowest relevant commands. Strata reruns the complete configured check set after a repair changes files and records the authoritative results.`;
     const repaired = await repairGate(repo, record, stage, config, file, context, role,
       gate, routedFindings, repairTask, coordination.memory_handoff ?? '', repairRound);
     stage.accepted_paths = [...new Set([...(stage.accepted_paths ?? []), ...repaired.changed])];
