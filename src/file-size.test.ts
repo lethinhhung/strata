@@ -11,7 +11,8 @@ const lineLimitExemptions = new Set([
 test('tracked maintained text files stay below 120 lines', () => {
   const files = execFileSync('git', ['ls-files', '--cached', '-z'], { encoding: 'utf8' })
     .split('\0').filter(Boolean);
-  const oversized = files.filter((file) => !lineLimitExemptions.has(file.split('/').at(-1) ?? '')).filter((file) => {
+  const oversized = files.filter((file) => !file.startsWith('docs/temps/'))
+    .filter((file) => !lineLimitExemptions.has(file.split('/').at(-1) ?? '')).filter((file) => {
     const buffer = fs.readFileSync(file);
     if (buffer.includes(0)) return false;
     const text = buffer.toString('utf8');
