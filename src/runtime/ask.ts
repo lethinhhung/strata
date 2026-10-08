@@ -74,7 +74,7 @@ export async function ask(config: any, role: string, task: any, context: string,
        response = result.text;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        if (!(strong || roleDefinition || !(error instanceof ProviderError) || !isTransientFailure(message))) throw error;
+        if (strong || roleDefinition || !(error instanceof ProviderError) || !isTransientFailure(message)) throw error;
         const result = await invoke(config.strong, prompt, task.repo, role, { skipGitRepoCheck });
         invokeResult = result;
         response = result.text;

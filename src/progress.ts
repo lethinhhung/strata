@@ -1,4 +1,4 @@
-import type { ProgressEntry, AgentTransition, StageTransition, RunTransition, GateTransition } from './runtime/types.js';
+import type { ProgressEntry, StageTransition } from './runtime/types.js';
 
 export function formatProgress(entry: ProgressEntry): string {
    const time = new Date(entry.timestamp).toLocaleTimeString();

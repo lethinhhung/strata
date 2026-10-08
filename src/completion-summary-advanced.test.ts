@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { formatCompletionSummary } from './progress.js';
-import type { RunRecord } from './runtime/types.js';
 
 test('completion summary omits validation when not present', () => {
     const record: any = {
