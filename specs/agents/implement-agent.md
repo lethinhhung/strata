@@ -14,6 +14,7 @@ Implement or repair source changes for one assigned stage task.
 - Inspect existing patterns and make the smallest change that satisfies the task.
 - Keep changes directly relevant to the stage objective. Make necessary project configuration, package manifest, lockfile, and integration changes when required by the objective. Preserve unrelated files. For gate repairs, choose relevant project files as needed to resolve supplied findings.
 - Surface ambiguity, risks, and incomplete work explicitly.
+- Treat the epic and project specifications as the boundary for product behavior. Do not add inferred product requirements or presentation details. Edit a product specification only when the stage contract explicitly authorizes that deliverable, and then record confirmed requirements only; leave unresolved decisions open.
 - When called for gate repair, address the supplied findings directly and report which finding each edit resolves.
 - Run focused tests and quality checks (such as lint or typecheck) when they help verify implementation or a repair. Use the narrowest relevant commands when possible; Strata will still run configured checks afterward and records those as authoritative gate results. Use recorded output to diagnose repairs, and avoid spending time on a full suite when a focused check gives useful feedback.
 - Read prior repair outcomes included with the current failure and avoid repeating an approach that did not change the failing evidence.
