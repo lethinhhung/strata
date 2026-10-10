@@ -1,68 +1,38 @@
 # Strata Core Specification
 
-This document is the normative source of truth for Strata behavior. Supporting specifications must follow it.
+## Purpose
 
-## 1. Purpose and Scope
-Strata is a thin TypeScript/Node.js CLI wrapper that coordinates AI agents implementing features in TypeScript/Node.js projects. It loads project instructions, starts the configured coordinator and agents, passes results between them, records resumable workflow state, runs project-defined checks, and commits completed stages.
+Strata is a thin TypeScript CLI wrapper around an agent workflow. It coordinates sessions, passes context and task contracts, and checkpoints completed stages. The workflow, role definitions, and target repository determine the work; Strata supplies the orchestration mechanism.
 
-Strata owns orchestration mechanics and stage gates. Coordinators plan and prepare task handoffs; worker agents implement and assess the work.
+## Inputs
 
-## 2. Goals
-- Use a Codex run Coordinator and Stage Coordinator with OpenCode worker agents to plan and execute an epic.
-- Let projects provide role instructions and provider/model settings while Strata owns the stage sequence and gates.
-- Support multiple LLM providers through provider adapters. The current default is Codex for coordinators and OpenCode for agents.
-- Decompose work into single-concern logic and UI stages; run a bounded implementation, review, test, and validation pipeline for each.
-- Preserve workflow context, decisions, evidence, and resumable state.
-- Run project-defined checks, commit each stage with a `stage-N:` subject, push it to `origin` as a checkpoint, and open a pull request after the run completes.
+- **Workflow:** Strata's workflow definition, which describes orchestration behavior and mechanism.
+- **Agent definitions:** Role instructions and handoff contracts for coordinators, explorers, implementers, testers, validators, and the archivist.
+- **Runtime target:** TypeScript on Node.js.
+- **Epic:** The user's requested behavior, written to `prompt/epic.md`.
+- **Target repository:** The repository selected for the work, including its `specs/` and applicable project rules.
 
-## 3. Non-Goals
-- Replacing the project's build, test, lint, typecheck, or other quality tools.
-- Deploying the result.
+The user switches to the target repository's intended branch before running Strata. The run works in that current branch and does not choose a different branch implicitly.
 
-## 4. Roles
-- **Strata CLI:** Loads configuration, invokes providers, runs configured checks, performs bounded repair cycles, records state, and commits and pushes stage checkpoints and completed run changes.
-- **Coordinator:** Run-level planning role. Creates the stage plan. The default provider is Codex. See [Coordinator role](agents/epic-coordinator.md).
-- **Stage Coordinator:** Prepares one stage's task handoff and review criteria. The runtime owns the fixed specialist sequence and gate loop. The default provider is Codex. See [Stage Coordinator role](agents/stage-coordinator.md).
-- **Agents:** Project-defined roles that perform exploration, implementation, review, testing, validation, or other project-specific work. Their definitions can add, remove, or combine roles to suit the project. The default provider is OpenCode. See [agent role specs](agents/).
-- Memory is read as advisory planning context. After each successful stage checkpoint, Strata invokes the Archivist to record durable stage knowledge for following stages. Archival failures are recorded and do not fail the stage.
+## Workflow
 
-## 5. Project and Role Definitions
-- The target repository is authoritative for its conventions, acceptance criteria, available checks, and role customizations.
-- A project may provide its own definitions for the Coordinator, Stage Coordinator, and any agents. A project definition overrides Strata's default for that role; Strata defaults fill only roles the project has not defined.
-- Role definitions are independent: each states its purpose, provider/model selection, inputs, responsibilities, boundaries, handoff format, and project-specific expectations.
-- The pipeline is fixed: implementation, then review and test authoring in parallel, then configured checks and validation. Project role instructions may specialize the work but cannot skip a pipeline step.
-- Project role instructions cannot disable stage checkpoints, bounded repair cycles, configured checks, or push attempts.
-- See [project profile and provider resolution](project-profile.md).
+1. The first Codex session acts as the **Epic Coordinator**. It reads the epic, Strata workflow and agent definitions, and the target repository's specifications and rules. It divides the epic into focused exploration tasks.
+2. Strata starts multiple **Explore Agent** sessions to investigate those tasks. Explorers return findings and relevant repository context; they do not implement the epic.
+3. The Epic Coordinator reviews the exploration results and divides the epic into ordered stages, with objectives, dependencies, and completion criteria.
+4. For each stage, a **Stage Coordinator** session turns the stage into ordered implementation tasks with clear scopes and acceptance criteria.
+5. Strata runs the stage loop: explore any task-specific unknowns, implement the tasks, test the changes, and validate them against the stage criteria and target repository rules. Findings that need changes return to implementation, and the test and validation loop repeats until the stage is ready or a concrete blocker is recorded.
+6. After a stage is ready, the **Archivist** writes durable notes, decisions, and progress to `memory/` so later stages can use the accumulated context.
+7. Strata commits and pushes each completed stage to the current branch before proceeding to the next stage.
 
-## 6. Workflow and Context
-- The Coordinator inspects the epic and repository, loads applicable project instructions, and produces a stage plan with objectives, dependencies, completion criteria, and checkpoint identities.
-- Product requirements come from the user's request and target-project specifications. Coordinators and agents must not turn missing details into new normative product behavior. They may state a low-impact, reversible implementation assumption when needed, but must label it as an assumption. Decisions affecting user-visible behavior, privacy, data capture or retention, compatibility, or product scope remain unresolved until the user or an existing project specification settles them. Do not plan dependent implementation work while such a decision is unresolved.
-- A specification-edit stage may clarify or revise product scope when the epic explicitly requests new behavior that requires a specification update, or when the user approves a specification change. Make the smallest change needed to record confirmed behavior; preserve existing requirements and avoid duplicate or restated prose. Put unsettled behavior in the project's existing open-questions section when available. Do not prescribe UI layout, copy, truncation, fallback behavior, or other design details unless the user or project specification requires them.
-- Every stage runs implementation, then review and test authoring in parallel when their write scopes do not overlap (otherwise test authoring precedes review), configured checks, and validation. The Stage Coordinator supplies an ordered list of focused implementation tasks with specialist roles; Strata invokes each task sequentially before continuing to the gates. Mixed backend/data and UI work may be split, with backend/data first when UI depends on it. The coordinator cannot skip a specialist step.
-- Strata passes findings, decisions, changed paths, check outcomes, and prior repair attempts between roles. Agents must receive enough context to continue work without repeating failed approaches.
-- Agents return findings, summaries, coverage notes, check evidence, and handoffs through their structured responses and Strata's run record. Create or modify project files only when the stage contract requires a deliverable; do not create extra reports, summaries, coverage files, or handoff documents.
-- Review, test, validation, and configured-check failures are sent through bounded repair cycles. Reaching a configured limit records open findings and permits the stage commit; concrete blockers halt the run.
-- Work runs in the repository selected by `--repo`, on its current branch or a branch chosen by `--branch`; the default branch is refused. The worktree must be clean apart from Strata config and the epic input.
-- Resumption restores the plan, stage state, role handoffs, and prior evidence. Completed stages are not repeated when their recorded commits remain present.
+## Responsibilities
 
-## 7. Checks, Completion, and Checkpointing
-- Every stage runs implementation, review, test, and validation. The Stage Coordinator assigns `screen_implementer` to UI tasks and `implementer` to logic tasks; Strata invokes the ordered tasks sequentially. Review and test authoring run concurrently after implementation when their write scopes do not overlap; otherwise test authoring precedes review. Configured commands run once after authoring, followed by validation.
-- The project's configured automated checks are mandatory requirements. Run every configured test, lint, typecheck, build, or other check that applies to the target project once after test authoring, record the command and result, and return failures with their evidence to the relevant repair agent.
-- Strata discovers checks from explicit project configuration or project instructions; it must not invent a requirement for a check the project does not use. A check absent from the project is not a failure.
-- Review, test, validation, and configured-check findings are routed to an edit-capable agent for bounded repair cycles. If the limit is reached, the stage is committed with unresolved findings recorded. A concrete blocker or commit failure halts the run.
-- Repair limits are configured per gate and default to three cycles. A limit does not erase the finding: it is recorded in the stage report and surfaced in the run outcome.
-- A stage is complete only after its `stage-N:` commit exists. Push is attempted with retry and rebase; a failed rebase is aborted to restore the worktree and index before later stages continue. A push failure is recorded but does not prevent later stages. A stage commit failure halts the run.
-- Commit only the completed stage's changes, with an identifiable stage/checkpoint message. A commit failure leaves the stage incomplete and resumable.
-- After all stages complete, commit every remaining worktree change, push the branch, verify the worktree is clean, then create or reuse a GitHub pull request. Record the pull-request URL and completed status in the run record, commit and push that update, and verify the worktree is clean again. Any failure in this sequence leaves the run incomplete and resumable.
+- Strata owns session orchestration, context handoffs, stage sequencing, workflow state, and per-stage commit and push checkpoints.
+- Coordinators plan and delegate; agents perform the work described by their definitions. Role definitions may tailor how work is done without changing the epic or target repository requirements.
+- The target repository remains authoritative for product behavior, conventions, and applicable checks. Strata must not invent requirements when these sources are silent; unresolved material questions are recorded as blockers for the user.
+- The archivist records useful, durable knowledge under `memory/`; memory supports later work and does not override the epic or repository specifications.
 
-## 8. Run Completion and Memory
-- The run completes after every planned stage has reached its checkpoint, remaining changes are committed and pushed, the worktree is clean, and a pull request is open.
-- After each completed stage checkpoint, Strata invokes the Archivist with that stage's results and writes validated decision, note, and progress entries under the configured memory directory. Writes are serialized before the next stage starts, so later stages can consult them. Archival is not a gate; failures are recorded and retried when resuming. `strata archive RUN_ID` remains available to archive a previously completed run or retry archival manually.
+## Runtime and completion
 
-## 9. Providers and Runtime
-- Provider integrations are adapters. Role definitions select a provider and model independently, allowing different providers for coordinators and agents and future provider additions without changing orchestration policy.
-- Current defaults: Codex invokes the run Coordinator and Stage Coordinators; OpenCode invokes agents. OpenCode uses its configured model/provider (currently NVIDIA in this setup). Provider credentials remain in provider-owned authentication or environment settings, not Strata project config or run records.
-- Strata is implemented in TypeScript on Node.js and targets TypeScript/Node.js repositories. Provider-specific command construction, output parsing, and authentication remain outside the workflow contract.
+Strata is implemented in TypeScript and runs on Node.js. It targets TypeScript/Node.js repositories. Provider-specific session startup and response handling are implementation details behind the workflow interface.
 
-## 10. Success Criteria
-Strata reliably coordinates the project-defined roles, carries useful context through diagnosis and repair, executes the target project's configured checks, commits and pushes each completed stage on the selected branch, records gate caveats, and preserves enough state to resume after a halt. The agents and coordinators—not universal CLI gate policy—determine what work is needed to satisfy the project's requirements.
+A stage is complete when its implementation, tests, and validation meet the stage criteria and its commit has been pushed to the current branch. The run is complete when all stages are checkpointed and their memory updates are written. A blocker or failed checkpoint must leave enough workflow state and context to resume the run.
