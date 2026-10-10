@@ -36,7 +36,7 @@ const defaultRecord: Partial<RunRecord> = {
   // A resumed run may share a worktree with unrelated changes. Commit only
   // paths observed from this stage's agents and leave other paths untouched.
   const eligible = changed.filter((filePath: string) =>
-    !filePath.startsWith('specs/') && !filePath.startsWith('docs/temps/') &&
+    !filePath.startsWith('docs/temps/') &&
     ((stage.accepted_paths ?? []).includes(filePath) || (stage.test_repair_paths ?? []).includes(filePath)));
   if (config.workflow.checkpoint) {
     const ordinal = Math.max(1, record.stages.findIndex((item: any) => item.id === stage.id) + 1);

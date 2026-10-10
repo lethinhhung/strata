@@ -11,12 +11,28 @@ export async function agentStep<T>(record: any, file: string, subtype: AgentSubt
   record.progress.push(entry);
   save(record, file);
   const started = performance.now();
-  try {
-    return await action();
-  } finally {
-    entry.duration_ms = performance.now() - started;
-    save(record, file);
-    const listener = record.onProgress as ((progress: ProgressEntry) => void) | undefined;
-    listener?.({ ...entry });
-  }
+   try {
+     const result = await action();
+// Extract telemetry from result if present
+      if (result && typeof result === 'object') {
+        if ('model' in result && typeof result.model === 'string') {
+          entry.model = result.model;
+        }
+        if ('prompt_tokens' in result && typeof result.prompt_tokens === 'number') {
+          entry.prompt_tokens = result.prompt_tokens;
+        }
+        if ('completion_tokens' in result && typeof result.completion_tokens === 'number') {
+          entry.completion_tokens = result.completion_tokens;
+        }
+        if ('total_tokens' in result && typeof result.total_tokens === 'number') {
+          entry.total_tokens = result.total_tokens;
+        }
+      }
+     return result;
+   } finally {
+     entry.duration_ms = performance.now() - started;
+     save(record, file);
+     const listener = record.onProgress as ((progress: ProgressEntry) => void) | undefined;
+     listener?.({ ...entry });
+   }
 }

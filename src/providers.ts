@@ -1,36 +1,19 @@
 import { spawn } from 'node:child_process';
 import { isTransientFailure, isTransientProviderEvent, retryDelay } from './providerRetry.js';
 import { parseCodexOutput, parseOpenCodeOutput } from './providers/parse.js';
-
 export class ProviderError extends Error {}
-
-interface Model {
-  provider: string;
-  model: string;
-  command: string;
-  timeout_seconds: number;
-  extra_args: string[];
-}
-
-const sleep = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
-
+interface Model { provider: string; model: string; command: string; timeout_seconds: number; extra_args: string[]; }
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 function run(command: string, args: string[], { cwd, timeout, stopOnTransientEvents }: { cwd: string; timeout: number; stopOnTransientEvents?: boolean }): Promise<{ code: number | null; signal: NodeJS.Signals | null | undefined; timedOut: boolean; stdout: string; stderr: string; transientFailure?: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], shell: false });
-    const stdout: Uint8Array[] = [];
-    const stderr: Uint8Array[] = [];
-    let timedOut = false;
-    let settled = false;
-    let eventBuffer = '';
-    let logBuffer = '';
-    let transientEvents = 0;
-    let transientFailure: string | undefined;
-    let exitTimer: NodeJS.Timeout;
+    const stdout: Uint8Array[] = []; const stderr: Uint8Array[] = [];
+    let timedOut = false; let settled = false; let eventBuffer = ''; let logBuffer = '';
+    let transientEvents = 0; let transientFailure: string | undefined; let exitTimer: NodeJS.Timeout;
     const finish = (code: number | null, signal: NodeJS.Signals | null | undefined) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      clearTimeout(exitTimer);
+      clearTimeout(timer); clearTimeout(exitTimer);
       resolve({ code, signal, timedOut, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8'), transientFailure });
     };
     const timer = setTimeout(() => {
@@ -62,22 +45,21 @@ function run(command: string, args: string[], { cwd, timeout, stopOnTransientEve
     child.on('error', (error: Error) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      clearTimeout(exitTimer);
+      clearTimeout(timer); clearTimeout(exitTimer);
       reject(error);
     });
     child.on('exit', (code: number | null, signal: NodeJS.Signals | null | undefined) => {
       exitTimer = setTimeout(() => {
-        child.stdout.destroy();
-        child.stderr.destroy();
+        child.stdout.destroy(); child.stderr.destroy();
         finish(code, signal);
       }, 1000);
     });
     child.on('close', finish);
   });
 }
-
-export async function invoke(model: Model, prompt: string, cwd: string, role: string, { skipGitRepoCheck = false } = {}): Promise<string> {
+export async function invoke(model: Model, prompt: string, cwd: string, role: string, { skipGitRepoCheck = false } = {}): Promise<{
+  text: string; model?: string; prompt_tokens?: number; completion_tokens?: number; total_tokens?: number;
+}> {
   let args: string[];
   const provider = model.provider.toLowerCase();
   if (provider === 'codex') {
@@ -104,7 +86,7 @@ export async function invoke(model: Model, prompt: string, cwd: string, role: st
     }
     if (result.code === 0 && !result.timedOut) {
       const response = provider === 'codex' ? parseCodexOutput(result.stdout) : parseOpenCodeOutput(result.stdout);
-      if (response.trim()) return response;
+      if (response.text.trim()) return response;
       result = { ...result, code: 1, stderr: 'Provider returned no agent text response' };
     }
     const failure = `${result.transientFailure ?? ''}\n${result.stderr}\n${result.stdout}`;
@@ -114,5 +96,5 @@ export async function invoke(model: Model, prompt: string, cwd: string, role: st
     }
     await sleep(retryDelay(attempt, failure));
   }
-  return '';
+  return { text: '' };
 }

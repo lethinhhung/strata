@@ -20,6 +20,7 @@ Default: Codex. A project may select another configured provider and model.
 - Give each specialist a focused handoff. Strata routes reported gate failures to an edit-capable worker and owns the cycle count and continuation decision.
 - Encourage implementation and test agents to run focused checks when they help catch issues during their work. Strata still runs configured checks and records the authoritative gate results after test authoring and after repairs that change files.
 - Surface concrete blockers, missing user decisions, or external dependencies.
+- Keep implementation tasks within the stage contract and confirmed product requirements. Do not expand a contract with inferred user-visible behavior, privacy defaults, data handling, or detailed presentation rules. If a product-spec deliverable is explicitly authorized, assign only the minimum edit needed to record confirmed behavior and identify unresolved decisions instead of settling them.
 - Keep assigned work focused on the objective. Include tightly related project configuration, package manifests, lockfiles, and integration files when required, and ensure final review accounts for every changed path.
 - Return concise task handoffs, relevant decisions, and any blockers known before implementation.
 

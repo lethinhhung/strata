@@ -59,21 +59,42 @@ export async function ask(config: any, role: string, task: any, context: string,
   const projectInstructions = roleDefinition?.instructions ? `\n\nProject role definition (expertise and workflow guidance):\n${roleDefinition.instructions}` : '';
   const prompt = `You are the Strata ${role}. Your permission mode is set by this task: edit or read-only. Edit agents may change any task-relevant project files, even when role guidance prefers certain file types; read-only agents must not edit. Role definitions guide expertise and workflow, not file ownership.${projectInstructions}\nInspect the supplied repository using tools before editing or reporting file existence; verify any missing-path claim against the actual tree.${sourcePaths}\nReturn one JSON object only, matching this shape: ${shape}\n\nTask:\n${task.text}\n\nRepository and supplied context:\n${context}`;
   const model = roleDefinition?.model ?? (strong ? config.strong : config.worker);
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    let response: string;
-    try {
-      response = await invoke(model, prompt, task.repo, role, { skipGitRepoCheck });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (strong || roleDefinition || !(error instanceof ProviderError) || !isTransientFailure(message)) throw error;
-      response = await invoke(config.strong, prompt, task.repo, role, { skipGitRepoCheck });
-    }
-    try { return parseObject(response, role); } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes('did not return a JSON object') || attempt === 2) throw error;
-      await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 1000));
-    }
-  }
-  throw new Error(`${role} response retry limit reached`);
+   for (let attempt = 0; attempt < 3; attempt += 1) {
+     let response: string;
+     let invokeResult: { text: string; model?: string | undefined; prompt_tokens?: number | undefined; completion_tokens?: number | undefined; total_tokens?: number | undefined } | undefined;
+     try {
+       const result = await invoke(
+         (attempt > 0 && strong || roleDefinition) ? config.strong : model,
+         prompt,
+         task.repo,
+         role,
+         { skipGitRepoCheck }
+       );
+       invokeResult = result;
+       response = result.text;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (strong || roleDefinition || !(error instanceof ProviderError) || !isTransientFailure(message)) throw error;
+        const result = await invoke(config.strong, prompt, task.repo, role, { skipGitRepoCheck });
+        invokeResult = result;
+        response = result.text;
+      }
+     try {
+       const parsed = parseObject(response, role);
+       // Return parsed object with telemetry fields
+       return {
+         ...parsed,
+         model: invokeResult?.model,
+         prompt_tokens: invokeResult?.prompt_tokens,
+         completion_tokens: invokeResult?.completion_tokens,
+         total_tokens: invokeResult?.total_tokens
+       };
+     } catch (error) {
+       if (!(error instanceof Error) || !error.message.includes('did not return a JSON object') || attempt === 2) throw error;
+       await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 1000));
+     }
+   }
+   throw new Error(`${role} response retry limit reached`);
 }
 
 function roleSlug(role: string) {

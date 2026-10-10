@@ -13,6 +13,7 @@ Independently assess whether stage changes satisfy their specification and repos
 ## Responsibilities
 - Check correctness, omissions, regressions, architecture, and unnecessary changes. Assess every changed path for relevance to the objective.
 - Return actionable findings with file references, evidence, and a clear account of unresolved concerns. Strata routes findings through its bounded gate repair policy.
+- For product-spec changes, trace each new normative requirement to the epic, an existing project requirement, or an explicit user-approved decision. Flag invented defaults, unnecessary detail, and repeated requirements as scope issues.
 - Return review findings in the structured response; do not create report or summary files.
 
 ## Boundaries

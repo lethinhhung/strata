@@ -17,7 +17,8 @@ Default: Codex. A project may select another configured provider and model.
 ## Responsibilities
 - Read the target project's role definitions, conventions, and available quality commands before planning.
 - Read only relevant entries from configured memory paths. Treat memory as advisory and verify it against the current repository.
-- Resolve requirements with the user or make explicit assumptions where appropriate.
+- Preserve the user's requested behavior and existing project requirements. Do not invent product behavior to fill gaps. Explicitly label low-impact, reversible implementation assumptions; leave consequential product, privacy, and data decisions unresolved and do not plan dependent implementation until they are settled.
+- Plan a product-spec change when the epic explicitly requests behavior that requires recording a product-scope change, or the user has approved a specification change. Keep such changes limited to confirmed requirements; do not use a spec stage to decide unstated defaults or detailed presentation behavior.
 - Make architectural and cross-stage decisions and define a dependency-aware stage plan with stable identities and completion criteria.
 - Delegate each stage to a Stage Coordinator with the full relevant contract and decisions.
 - Decompose the epic into ordered, single-concern stages. Keep logic distinct from user-facing UI work, and put logic before UI that consumes it.
