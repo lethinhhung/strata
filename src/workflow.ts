@@ -186,11 +186,11 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     }), repo);
     checks = await runChecks(repo, config);
     const checkFailure = checks.filter((c) => c.code !== 0).map((c) => `${c.command.join(' ')} failed (${c.code})\n${c.output}`).join('\n');
-    const validation = jsonResponse(await invokeReadOnly(config.worker, promptFor('validator', {
+    const validation = statusResponse(await invokeReadOnly(config.worker, promptFor('validator', {
       task: 'Read-only validation. Compare the repository against the stage criteria and applicable specs. Return JSON {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}. Do not edit files.',
       contract, implementation: implementations.join('\n'), test_report: testReport, check_failure: checkFailure, context,
     }), repo));
-    const testerResult = safeJson(testReport);
+    const testerResult = safeStatusResponse(testReport);
     const currentFindings = [checkFailure, JSON.stringify(testerResult), JSON.stringify(validation)].filter(Boolean).join('\n');
     const thisPassed = !checkFailure && testerResult?.status === 'pass' && validation.status === 'pass';
     stage.attempts!.push({ attempt, implementations, checks, tester: testerResult ?? testReport, validation, passed: thisPassed });
@@ -246,7 +246,8 @@ function discoverChecks(repo: string): string[][] {
   try { scripts = JSON.parse(fs.readFileSync(packageFile, 'utf8')).scripts ?? {}; } catch { return []; }
   const manager = fs.existsSync(path.join(repo, 'pnpm-lock.yaml')) ? 'pnpm' : fs.existsSync(path.join(repo, 'yarn.lock')) ? 'yarn' : fs.existsSync(path.join(repo, 'bun.lock')) ? 'bun' : 'npm';
   const checks: string[][] = [];
-  for (const name of [scripts['test:ci'] ? 'test:ci' : scripts.test ? 'test' : '', 'lint', 'typecheck', 'build'].filter(Boolean)) {
+  const names = [scripts['test:ci'] ? 'test:ci' : scripts.test ? 'test' : '', 'lint', 'typecheck', 'build'].filter((name) => name && scripts[name]);
+  for (const name of names) {
     checks.push(manager === 'npm' ? ['npm', 'run', name] : [manager, 'run', name]);
   }
   return checks;
@@ -334,6 +335,25 @@ function findCoreSpec(): string | undefined {
   return undefined;
 }
 
-function safeJson(text: string): any {
-  try { return jsonResponse(text); } catch { return undefined; }
+function statusResponse(text: string): any {
+  try { return jsonResponse(text); } catch { /* accept clearly labeled status reports */ }
+  const labels = [...text.matchAll(/\*{0,2}(status|findings|summary)\s*:?\s*\*{0,2}\s*:?\s*/ig)];
+  const values = new Map<string, string>();
+  for (let index = 0; index < labels.length; index += 1) {
+    const label = labels[index];
+    const start = (label.index ?? 0) + label[0].length;
+    const end = labels[index + 1]?.index ?? text.length;
+    values.set(label[1].toLowerCase(), text.slice(start, end).trim().replace(/\s*\*\s*$/, '').trim());
+  }
+  const status = values.get('status')?.match(/^(pass|fail)\b/i)?.[1]?.toLowerCase();
+  if (!status) throw new Error(`Agent response did not contain JSON or a labeled pass/fail status: ${text.slice(0, 1000)}`);
+  const findingText = values.get('findings') ?? '';
+  const findings = /^(none|no findings|no mismatches detected\.?|n\/a)$/i.test(findingText)
+    ? []
+    : findingText.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean);
+  return { status, findings, summary: values.get('summary') ?? '' };
+}
+
+function safeStatusResponse(text: string): any {
+  try { return statusResponse(text); } catch { return undefined; }
 }
