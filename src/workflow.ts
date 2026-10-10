@@ -185,7 +185,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     }
     let checks = await runChecks(repo, config);
     const testReport = await invoke(config.worker, promptFor('tester', {
-      task: 'Review the implementation, run relevant focused checks, and fix test or quality failures. Do not edit specs. Return JSON {"status":"pass|fail","findings":[...],"summary":"..."}.',
+      task: 'Review the implementation, run relevant focused checks, and fix test or quality failures. Do not edit specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":[...],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail".',
       contract, implementation: implementations.join('\n'), checks: JSON.stringify(checks), previous_findings: findings, context,
     }), repo);
     checks = await runChecks(repo, config);
@@ -193,7 +193,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     let validation: any;
     try {
       validation = statusResponse(await invokeReadOnly(config.worker, promptFor('validator', {
-        task: 'Read-only validation. Compare the repository against the stage criteria and applicable specs. Return JSON {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}. Do not edit files.',
+        task: 'Read-only validation. Compare the repository against the stage criteria and applicable specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail". Do not edit files.',
         contract, implementation: implementations.join('\n'), test_report: testReport, check_failure: checkFailure, context,
       }), repo));
     } catch (error) {
@@ -410,7 +410,17 @@ function findCoreSpec(): string | undefined {
 }
 
 function statusResponse(text: string): any {
-  try { return jsonResponse(text); } catch { /* accept clearly labeled status reports */ }
+  try {
+    const parsed = jsonResponse(text);
+    if (parsed && ['pass', 'fail'].includes(String(parsed.status).toLowerCase())) {
+      return {
+        ...parsed,
+        status: String(parsed.status).toLowerCase(),
+        findings: Array.isArray(parsed.findings) ? parsed.findings.map(String) : [],
+        summary: String(parsed.summary ?? ''),
+      };
+    }
+  } catch { /* accept clearly labeled status reports */ }
   const labels = [...text.matchAll(/\*{0,2}(status|findings|summary)\s*:?\s*\*{0,2}\s*:?\s*/ig)];
   const values = new Map<string, string>();
   for (let index = 0; index < labels.length; index += 1) {
@@ -420,7 +430,14 @@ function statusResponse(text: string): any {
     values.set(label[1].toLowerCase(), text.slice(start, end).trim().replace(/\s*\*\s*$/, '').trim());
   }
   const status = values.get('status')?.match(/^(pass|fail)\b/i)?.[1]?.toLowerCase();
-  if (!status) throw new Error(`Agent response did not contain JSON or a labeled pass/fail status: ${text.slice(0, 1000)}`);
+  if (!status) {
+    const excerpt = text.trim().slice(0, 800);
+    return {
+      status: 'fail',
+      findings: [`Agent response did not contain JSON or a labeled pass/fail status. Response: ${excerpt}`],
+      summary: 'The agent response format was invalid, so this result cannot pass validation.',
+    };
+  }
   const findingText = values.get('findings') ?? '';
   const findings = /^(none|no findings|no mismatches detected\.?|n\/a)$/i.test(findingText)
     ? []
@@ -429,5 +446,5 @@ function statusResponse(text: string): any {
 }
 
 function safeStatusResponse(text: string): any {
-  try { return statusResponse(text); } catch { return undefined; }
+  return statusResponse(text);
 }
