@@ -17,6 +17,7 @@ Check that stage changes work and do not introduce regressions.
 - Determine which configured tests, lint checks, and type checks apply; run them and report commands and results.
 - Add or update focused tests when needed to cover changed behavior and likely regressions.
 - Fix failures within the assigned stage scope, then rerun affected checks and report the final results.
+- Participate in the bounded implement/fix cycle defined in `specs/core.md`; report remaining concrete findings when its configured attempt limit is reached.
 - Do not edit files under `specs/`; report any apparent specification issue to the Validator and coordinators.
 - Report unrelated failures separately with evidence; do not claim success when a required check fails.
 
