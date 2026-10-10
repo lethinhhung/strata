@@ -7,6 +7,10 @@ import { invoke, jsonResponse, run } from './provider.js';
 
 type Stage = { id: string; title: string; objective: string; dependencies: string[]; completion_criteria: string[]; status?: string; attempts?: any[] };
 type RecordData = { id: string; status: string; created_at: string; updated_at: string; repo: string; epic: string; epic_file: string; branch: string; stages: Stage[]; blockers?: string[]; history: any[]; error?: string };
+type WorkspaceFile = { kind: 'file' | 'symlink'; contents: Buffer; mode: number };
+type WorkspaceSnapshot = { files: Map<string, WorkspaceFile>; indexPath: string; index?: Buffer; fingerprint: string };
+
+class ReadOnlyMutationError extends Error {}
 
 export async function startRun(repo: string, epic: string, epicFile: string, config: StrataConfig): Promise<RecordData> {
   const gitRoot = await run('git', ['rev-parse', '--show-toplevel'], repo, 10000);
@@ -186,10 +190,16 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     }), repo);
     checks = await runChecks(repo, config);
     const checkFailure = checks.filter((c) => c.code !== 0).map((c) => `${c.command.join(' ')} failed (${c.code})\n${c.output}`).join('\n');
-    const validation = statusResponse(await invokeReadOnly(config.worker, promptFor('validator', {
-      task: 'Read-only validation. Compare the repository against the stage criteria and applicable specs. Return JSON {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}. Do not edit files.',
-      contract, implementation: implementations.join('\n'), test_report: testReport, check_failure: checkFailure, context,
-    }), repo));
+    let validation: any;
+    try {
+      validation = statusResponse(await invokeReadOnly(config.worker, promptFor('validator', {
+        task: 'Read-only validation. Compare the repository against the stage criteria and applicable specs. Return JSON {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}. Do not edit files.',
+        contract, implementation: implementations.join('\n'), test_report: testReport, check_failure: checkFailure, context,
+      }), repo));
+    } catch (error) {
+      if (!(error instanceof ReadOnlyMutationError)) throw error;
+      validation = { status: 'fail', findings: [error.message], summary: 'Validation was rejected because the read-only agent changed the target worktree.' };
+    }
     const testerResult = safeStatusResponse(testReport);
     const currentFindings = [checkFailure, JSON.stringify(testerResult), JSON.stringify(validation)].filter(Boolean).join('\n');
     const thisPassed = !checkFailure && testerResult?.status === 'pass' && validation.status === 'pass';
@@ -221,22 +231,67 @@ async function runChecks(repo: string, config: StrataConfig): Promise<any[]> {
 }
 
 async function invokeReadOnly(agent: StrataConfig['worker'] | StrataConfig['strong'], prompt: string, repo: string): Promise<string> {
-  const before = await workspaceFingerprint(repo);
+  const before = await snapshotWorkspace(repo);
   const response = await invoke(agent, prompt, repo, true);
-  const after = await workspaceFingerprint(repo);
-  if (before !== after) throw new Error('A read-only workflow agent changed the target worktree');
+  const after = await snapshotWorkspace(repo);
+  if (before.fingerprint !== after.fingerprint) {
+    await restoreWorkspace(repo, before, after);
+    throw new ReadOnlyMutationError('A read-only workflow agent changed the target worktree; its changes were reverted.');
+  }
   return response;
 }
 
-async function workspaceFingerprint(repo: string): Promise<string> {
-  const tracked = await run('git', ['diff', '--binary', 'HEAD'], repo, 10000);
-  const untracked = await run('git', ['ls-files', '--others', '--exclude-standard', '-z'], repo, 10000);
-  const hash = createHash('sha256').update(tracked.stdout).update(tracked.stderr);
-  for (const file of untracked.stdout.split('\0').filter(Boolean).sort()) {
-    const full = path.join(repo, file);
-    try { hash.update(file).update(fs.readFileSync(full)); } catch { hash.update(`${file}:missing`); }
+async function snapshotWorkspace(repo: string): Promise<WorkspaceSnapshot> {
+  const listed = await run('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], repo, 10000);
+  const files = new Map<string, WorkspaceFile>();
+  for (const relative of listed.stdout.split('\0').filter(Boolean)) {
+    const full = path.join(repo, relative);
+    try {
+      const stat = fs.lstatSync(full);
+      if (stat.isSymbolicLink()) files.set(relative, { kind: 'symlink', contents: Buffer.from(fs.readlinkSync(full)), mode: stat.mode & 0o777 });
+      else if (stat.isFile()) files.set(relative, { kind: 'file', contents: fs.readFileSync(full), mode: stat.mode & 0o777 });
+    } catch { /* ignore files disappearing during enumeration */ }
   }
+  const indexPathResult = await run('git', ['rev-parse', '--git-path', 'index'], repo, 10000);
+  const indexPath = path.resolve(repo, indexPathResult.stdout.trim());
+  let index: Buffer | undefined;
+  try { index = fs.readFileSync(indexPath); } catch { /* a repository may not have an index yet */ }
+  return { files, indexPath, index, fingerprint: fingerprintWorkspace(files, index) };
+}
+
+function fingerprintWorkspace(files: Map<string, WorkspaceFile>, index?: Buffer): string {
+  const hash = createHash('sha256');
+  for (const [file, state] of [...files.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    hash.update(file).update(state.kind).update(String(state.mode)).update(state.contents);
+  }
+  if (index) hash.update(index);
   return hash.digest('hex');
+}
+
+async function restoreWorkspace(repo: string, before: WorkspaceSnapshot, after: WorkspaceSnapshot): Promise<void> {
+  for (const [relative, state] of after.files) {
+    if (before.files.has(relative)) continue;
+    const full = path.join(repo, relative);
+    try { fs.unlinkSync(full); } catch { /* already removed */ }
+  }
+  for (const [relative, state] of before.files) {
+    const full = path.join(repo, relative);
+    const current = after.files.get(relative);
+    if (current && current.kind === state.kind && current.mode === state.mode && current.contents.equals(state.contents)) continue;
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    try { fs.rmSync(full, { force: true }); } catch { /* recreate below */ }
+    if (state.kind === 'symlink') fs.symlinkSync(state.contents.toString(), full);
+    else {
+      fs.writeFileSync(full, state.contents);
+      fs.chmodSync(full, state.mode);
+    }
+  }
+  if (before.index) {
+    fs.mkdirSync(path.dirname(before.indexPath), { recursive: true });
+    fs.writeFileSync(before.indexPath, before.index);
+  } else if (after.index) {
+    try { fs.unlinkSync(before.indexPath); } catch { /* index already absent */ }
+  }
 }
 
 function discoverChecks(repo: string): string[][] {
