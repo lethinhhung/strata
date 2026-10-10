@@ -63,6 +63,7 @@ async function main(argv: string[]): Promise<number> {
     const config = loadConfig(repo, typeof options.config === 'string' ? options.config : undefined);
     const record = await resumeRun(repo, positional[1], config);
     console.log(`Run ${record.id} ${record.status}: ${record.stages.length} stage(s)`);
+    for (const blocker of record.blockers ?? []) console.log(`Blocker: ${blocker}`);
     return record.status === 'complete' ? 0 : 1;
   }
   if (command !== 'run') throw new Error(`Unknown command ${command ?? '(empty)'}`);
@@ -90,6 +91,7 @@ async function main(argv: string[]): Promise<number> {
   const record = await startRun(repo, epic, epicFile, config);
   console.log(`Run ${record.id} ${record.status}: ${record.stages.length} stage(s)`);
   console.log(`Run record: ${path.join(repo, 'docs', 'temps', `${record.id}.json`)}`);
+  for (const blocker of record.blockers ?? []) console.log(`Blocker: ${blocker}`);
   return record.status === 'complete' ? 0 : 1;
 }
 

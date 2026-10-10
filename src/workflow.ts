@@ -6,7 +6,7 @@ import type { StrataConfig } from './config.js';
 import { invoke, jsonResponse, run } from './provider.js';
 
 type Stage = { id: string; title: string; objective: string; dependencies: string[]; completion_criteria: string[]; status?: string; attempts?: any[] };
-type RecordData = { id: string; status: string; created_at: string; updated_at: string; repo: string; epic: string; epic_file: string; branch: string; stages: Stage[]; history: any[]; error?: string };
+type RecordData = { id: string; status: string; created_at: string; updated_at: string; repo: string; epic: string; epic_file: string; branch: string; stages: Stage[]; blockers?: string[]; history: any[]; error?: string };
 
 export async function startRun(repo: string, epic: string, epicFile: string, config: StrataConfig): Promise<RecordData> {
   const gitRoot = await run('git', ['rev-parse', '--show-toplevel'], repo, 10000);
@@ -26,7 +26,7 @@ export async function startRun(repo: string, epic: string, epicFile: string, con
   const promptFile = path.join(repo, 'prompt', 'epic.md');
   fs.mkdirSync(path.dirname(promptFile), { recursive: true });
   fs.writeFileSync(promptFile, `${epic.trim()}\n`, 'utf8');
-  const record: RecordData = { id, status: 'planning', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), repo, epic, epic_file: epicFile, branch, stages: [], history: [] };
+  const record: RecordData = { id, status: 'planning', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), repo, epic, epic_file: epicFile, branch, stages: [], blockers: [], history: [] };
   const file = path.join(repo, 'docs', 'temps', `${id}.json`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const save = () => { record.updated_at = new Date().toISOString(); fs.writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`); };
@@ -46,10 +46,14 @@ export async function startRun(repo: string, epic: string, epicFile: string, con
         task: String(item.question ?? item.task ?? 'Inspect the repository areas relevant to this epic and report findings.'), epic, context,
       }), repo));
     }
-    const plan = jsonResponse(await invokeReadOnly(config.strong, promptFor('epic_coordinator', {
-      task: 'Plan the requested epic as ordered implementation stages. Return JSON: {"summary":"...","stages":[{"id":"stable-kebab-id","title":"...","objective":"...","dependencies":[],"completion_criteria":["..."]}]}. Explore through repository inspection as needed. Do not implement. Keep criteria verifiable, order dependencies, preserve unresolved requirements as blockers.',
-      epic, context, initial_exploration: initialFindings.join('\n\n'),
-    }), repo));
+    const plan = await planEpic(config, repo, epic, context, initialFindings.join('\n\n'));
+    if (plan.blockers.length) {
+      record.blockers = plan.blockers;
+      record.status = 'blocked';
+      record.history.push({ type: 'blocked', blockers: plan.blockers });
+      save();
+      return record;
+    }
     if (!Array.isArray(plan.stages) || plan.stages.length === 0) throw new Error('Epic Coordinator returned no stages');
     record.stages = plan.stages.map((s: any, i: number) => ({
       id: String(s.id ?? `stage-${i + 1}`), title: String(s.title ?? `Stage ${i + 1}`), objective: String(s.objective ?? s.concern ?? ''),
@@ -82,11 +86,14 @@ export async function resumeRun(repo: string, reference: string, config: StrataC
   const record = JSON.parse(fs.readFileSync(file, 'utf8')) as RecordData;
   if (path.resolve(record.repo) !== path.resolve(repo)) throw new Error(`Run ${record.id} belongs to another repository: ${record.repo}`);
   if (record.status === 'complete') return record;
+  const wasBlocked = record.status === 'blocked';
   const save = () => { record.updated_at = new Date().toISOString(); fs.writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`); };
   record.status = 'running'; delete record.error; save();
   try {
     const context = projectContext(repo, config);
-    if (!record.stages.length) {
+    if (!record.stages.length || (wasBlocked && !record.stages.some((stage) => stage.status === 'complete'))) {
+      record.blockers = [];
+      record.stages = [];
       const explorationPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('epic_coordinator', {
         task: 'Identify up to three focused repository exploration questions needed to plan this epic. Return JSON {"exploration_tasks":[{"question":"..."}]}. Do not implement.',
         epic: record.epic, context,
@@ -100,10 +107,14 @@ export async function resumeRun(repo: string, reference: string, config: StrataC
           task: String(item.question ?? item.task ?? 'Inspect the repository areas relevant to this epic.'), epic: record.epic, context,
         }), repo));
       }
-      const plan = jsonResponse(await invokeReadOnly(config.strong, promptFor('epic_coordinator', {
-        task: 'Plan this epic as ordered implementation stages. Return JSON {"summary":"...","stages":[{"id":"stable-kebab-id","title":"...","objective":"...","dependencies":[],"completion_criteria":["..."]}]}. Do not implement. Keep criteria verifiable and preserve unresolved requirements as blockers.',
-        epic: record.epic, context, initial_exploration: findings.join('\n\n'),
-      }), repo));
+      const plan = await planEpic(config, repo, record.epic, context, findings.join('\n\n'));
+      if (plan.blockers.length) {
+        record.blockers = plan.blockers;
+        record.status = 'blocked';
+        record.history.push({ type: 'blocked', blockers: plan.blockers });
+        save();
+        return record;
+      }
       if (!Array.isArray(plan.stages) || !plan.stages.length) throw new Error('Epic Coordinator returned no stages while resuming the planning step');
       record.stages = plan.stages.map((s: any, i: number) => ({
         id: String(s.id ?? `stage-${i + 1}`), title: String(s.title ?? `Stage ${i + 1}`), objective: String(s.objective ?? s.concern ?? ''),
@@ -126,6 +137,17 @@ export async function resumeRun(repo: string, reference: string, config: StrataC
   } catch (error) {
     record.status = 'failed'; record.error = error instanceof Error ? error.message : String(error); save(); throw error;
   }
+}
+
+async function planEpic(config: StrataConfig, repo: string, epic: string, context: string, initialExploration: string) {
+  const plan = jsonResponse(await invokeReadOnly(config.strong, promptFor('epic_coordinator', {
+    task: 'Plan the explicitly requested epic as ordered implementation stages. Return JSON: {"summary":"...","blockers":["..."],"stages":[{"id":"stable-kebab-id","title":"...","objective":"...","dependencies":[],"completion_criteria":["..."]}]}. Use an empty blockers array when implementation can proceed. Do not implement. Keep criteria verifiable and order dependencies. Treat features explicitly requested by the epic as authorized work; absence from an MVP included-features list is not itself a conflict, and a private user-initiated export is not public sharing. Preserve existing privacy and data constraints while planning the requested feature. Do not require a specification edit unless the epic explicitly asks to change specifications. If a genuine unresolved decision prevents safe implementation, return it in blockers and do not create a stage whose purpose is to resolve that blocker or edit specs. Do not invent unavailable data sources; when requested metadata such as location is not captured or persisted, plan to omit it unless the epic explicitly authorizes collecting it.',
+    epic, context, initial_exploration: initialExploration,
+  }), repo));
+  return {
+    ...plan,
+    blockers: Array.isArray(plan.blockers) ? plan.blockers.map(String).filter(Boolean) : [],
+  };
 }
 
 async function runStage(repo: string, record: RecordData, stage: Stage, config: StrataConfig, context: string, save: () => void) {
