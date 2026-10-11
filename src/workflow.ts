@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { StrataConfig } from './config.js';
@@ -186,7 +187,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     for (let i = 0; i < tasks.length; i += 1) {
       try {
         implementations.push(await invoke(config.worker, promptFor('implementer', {
-          task: `Implement task ${i + 1} of ${tasks.length}. Inspect and build on the current worktree and the supplied exploration findings. Do not claim a required file or route is missing without checking the exact path. Complete the assigned task even when it spans multiple files. Make code changes in scope, follow project rules and specs, and do not create reports or edit specifications. Specification changes belong to the Epic Coordinator and require explicit authorization in the epic. Return a concise summary of actual changes.`,
+          task: `Implement task ${i + 1} of ${tasks.length}. Inspect and build on the current worktree and the supplied exploration findings. Use the repository file index in project context to locate existing routes and components; verify exact paths before claiming something is missing, and extend existing code instead of creating a duplicate. Complete the assigned task even when it spans multiple files. Do not stop at a plan, apology, or claim that the work is too large: make the scoped code changes. Follow project rules and specs, and do not create reports or edit specifications. Specification changes belong to the Epic Coordinator and require explicit authorization in the epic. Return a concise summary of actual changes.`,
           contract, implementation_task: tasks[i].task, task_plan: JSON.stringify(tasks), stage_exploration: explore,
           prior_task_results: implementations.join('\n\n'), previous_findings: findings, context,
         }), repo));
@@ -200,7 +201,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     let testReport: string;
     try {
       testReport = await invoke(config.worker, promptFor('tester', {
-        task: 'Review the implementation, run relevant focused checks, and fix test or quality failures. Do not edit specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":[...],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail".',
+        task: 'Review the implementation and the automated check results already provided. Do not rerun the configured full check suite; Strata runs it automatically before and after this review. Run only a narrowly focused check if needed to diagnose a specific failure, and fix failures introduced by this implementation. Do not edit specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":[...],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail".',
         contract, implementation: implementations.join('\n'), checks: JSON.stringify(checks), previous_findings: findings, context,
       }), repo);
     } catch (error) {
@@ -390,7 +391,15 @@ async function pushCurrentBranch(repo: string) {
 }
 
 function projectContext(repo: string, config: StrataConfig): string {
-  const chunks: string[] = [];
+  const listed = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: repo, encoding: 'utf8' });
+  const sourcePaths = listed.status === 0
+    ? listed.stdout.split('\n').filter((file) => /\.(?:[cm]?[jt]sx?|swift|kt|java|py|go|rs)$/.test(file)
+      && /^(?:app|apps|src|source|lib|test|tests|packages)\//.test(file))
+    : [];
+  const fileIndex = sourcePaths.slice(0, 500);
+  const chunks: string[] = fileIndex.length
+    ? [`--- Repository source file index (existing paths; first ${fileIndex.length} of ${sourcePaths.length}) ---\n${fileIndex.join('\n')}`]
+    : [];
   for (const relative of config.workflow.spec_paths) {
     const target = path.resolve(repo, relative);
     if (!target.startsWith(`${repo}${path.sep}`) && target !== repo) continue;
