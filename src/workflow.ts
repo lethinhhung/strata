@@ -186,16 +186,30 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     const implementations: string[] = [];
     const implementationFailures: string[] = [];
     for (let i = 0; i < tasks.length; i += 1) {
+      const values = {
+        task: `Implement task ${i + 1} of ${tasks.length}. Inspect and build on the current worktree and the supplied exploration findings. Use the repository file index in project context to locate existing routes and components; verify exact paths before claiming something is missing, and extend existing code instead of creating a duplicate. Complete the assigned task even when it spans multiple files. Do not stop at a plan, apology, or claim that the work is too large: make the scoped code changes. Follow project rules and specs, and do not create reports or edit specifications. Specification changes belong to the Epic Coordinator and require explicit authorization in the epic. Return a concise summary of actual changes.`,
+        contract, implementation_task: tasks[i].task, task_plan: JSON.stringify(tasks), stage_exploration: explore,
+        prior_task_results: implementations.join('\n\n'), previous_findings: findings, context: stageContext,
+      };
+      const implementationPrompt = promptFor('implementer', values);
       try {
-        implementations.push(await invoke(config.worker, promptFor('implementer', {
-          task: `Implement task ${i + 1} of ${tasks.length}. Inspect and build on the current worktree and the supplied exploration findings. Use the repository file index in project context to locate existing routes and components; verify exact paths before claiming something is missing, and extend existing code instead of creating a duplicate. Complete the assigned task even when it spans multiple files. Do not stop at a plan, apology, or claim that the work is too large: make the scoped code changes. Follow project rules and specs, and do not create reports or edit specifications. Specification changes belong to the Epic Coordinator and require explicit authorization in the epic. Return a concise summary of actual changes.`,
-          contract, implementation_task: tasks[i].task, task_plan: JSON.stringify(tasks), stage_exploration: explore,
-          prior_task_results: implementations.join('\n\n'), previous_findings: findings, context: stageContext,
-        }), repo));
+        implementations.push(await invoke(config.worker, implementationPrompt, repo));
       } catch (error) {
-        const failure = `Implementer task ${i + 1} failed: ${errorMessage(error)}`;
-        implementationFailures.push(failure);
-        implementations.push(failure);
+        const primaryFailure = `Implementer task ${i + 1} failed on ${config.worker.provider}: ${errorMessage(error)}`;
+        if (config.worker.provider === config.strong.provider && config.worker.model === config.strong.model) {
+          implementationFailures.push(primaryFailure);
+          implementations.push(primaryFailure);
+          continue;
+        }
+        console.error(`[strata] recovering failed implementer task ${i + 1} with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
+        try {
+          const recoveryPrompt = `${implementationPrompt}\n\n## Recovery handoff\nThe configured worker process failed before completing this task: ${errorMessage(error)}\nTake over implementation now. Inspect the current worktree, make the requested code changes, and return a concise summary of actual changes.`;
+          implementations.push(await invoke(config.strong, recoveryPrompt, repo));
+        } catch (recoveryError) {
+          const failure = `${primaryFailure}\nStrong-agent recovery also failed: ${errorMessage(recoveryError)}`;
+          implementationFailures.push(failure);
+          implementations.push(failure);
+        }
       }
     }
     let checks = await runChecks(repo, config);
