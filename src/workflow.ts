@@ -170,24 +170,40 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
   let findings = '';
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     if (attempt > 1 && findings) {
-      const repairPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('stage_coordinator', {
-        task: 'Review the prior implementation, tester, and validator findings. Clarify and route the required repairs as ordered implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}]}. Keep the original stage contract authoritative.',
-        contract, findings, context,
-      }), repo));
-      if (Array.isArray(repairPlan.implementation_tasks) && repairPlan.implementation_tasks.length) tasks = repairPlan.implementation_tasks;
+      try {
+        const repairPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('stage_coordinator', {
+          task: 'Review the prior implementation, tester, and validator findings. Clarify and route the required repairs as ordered implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}]}. Keep the original stage contract authoritative.',
+          contract, findings, context,
+        }), repo));
+        if (Array.isArray(repairPlan.implementation_tasks) && repairPlan.implementation_tasks.length) tasks = repairPlan.implementation_tasks;
+      } catch (error) {
+        findings += `\nStage Coordinator repair planning failed; retrying the previous implementation tasks. ${errorMessage(error)}`;
+      }
     }
     const implementations: string[] = [];
+    const implementationFailures: string[] = [];
     for (let i = 0; i < tasks.length; i += 1) {
-      implementations.push(await invoke(config.worker, promptFor('implementer', {
-        task: `Implement task ${i + 1} of ${tasks.length}. Make code changes in scope, follow project rules and specs, and do not create reports or edit specifications. Specification changes belong to the Epic Coordinator and require explicit authorization in the epic. Return a concise summary.`,
-        contract, implementation_task: tasks[i].task, previous_findings: findings, context,
-      }), repo));
+      try {
+        implementations.push(await invoke(config.worker, promptFor('implementer', {
+          task: `Implement task ${i + 1} of ${tasks.length}. Make code changes in scope, follow project rules and specs, and do not create reports or edit specifications. Specification changes belong to the Epic Coordinator and require explicit authorization in the epic. Return a concise summary.`,
+          contract, implementation_task: tasks[i].task, previous_findings: findings, context,
+        }), repo));
+      } catch (error) {
+        const failure = `Implementer task ${i + 1} failed: ${errorMessage(error)}`;
+        implementationFailures.push(failure);
+        implementations.push(failure);
+      }
     }
     let checks = await runChecks(repo, config);
-    const testReport = await invoke(config.worker, promptFor('tester', {
-      task: 'Review the implementation, run relevant focused checks, and fix test or quality failures. Do not edit specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":[...],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail".',
-      contract, implementation: implementations.join('\n'), checks: JSON.stringify(checks), previous_findings: findings, context,
-    }), repo);
+    let testReport: string;
+    try {
+      testReport = await invoke(config.worker, promptFor('tester', {
+        task: 'Review the implementation, run relevant focused checks, and fix test or quality failures. Do not edit specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":[...],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail".',
+        contract, implementation: implementations.join('\n'), checks: JSON.stringify(checks), previous_findings: findings, context,
+      }), repo);
+    } catch (error) {
+      testReport = JSON.stringify({ status: 'fail', findings: [`Tester process failed: ${errorMessage(error)}`], summary: 'Tester did not complete.' });
+    }
     checks = await runChecks(repo, config);
     const checkFailure = checks.filter((c) => c.code !== 0).map((c) => `${c.command.join(' ')} failed (${c.code})\n${c.output}`).join('\n');
     let validation: any;
@@ -197,13 +213,13 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
         contract, implementation: implementations.join('\n'), test_report: testReport, check_failure: checkFailure, context,
       }), repo));
     } catch (error) {
-      if (!(error instanceof ReadOnlyMutationError)) throw error;
-      validation = { status: 'fail', findings: [error.message], summary: 'Validation was rejected because the read-only agent changed the target worktree.' };
+      const message = error instanceof ReadOnlyMutationError ? error.message : `Validator process failed: ${errorMessage(error)}`;
+      validation = { status: 'fail', findings: [message], summary: 'Validation did not complete successfully.' };
     }
     const testerResult = safeStatusResponse(testReport);
-    const currentFindings = [checkFailure, JSON.stringify(testerResult), JSON.stringify(validation)].filter(Boolean).join('\n');
-    const thisPassed = !checkFailure && testerResult?.status === 'pass' && validation.status === 'pass';
-    stage.attempts!.push({ attempt, implementations, checks, tester: testerResult ?? testReport, validation, passed: thisPassed });
+    const currentFindings = [...implementationFailures, checkFailure, JSON.stringify(testerResult), JSON.stringify(validation)].filter(Boolean).join('\n');
+    const thisPassed = implementationFailures.length === 0 && !checkFailure && testerResult?.status === 'pass' && validation.status === 'pass';
+    stage.attempts!.push({ attempt, implementations, implementation_failures: implementationFailures, checks, tester: testerResult ?? testReport, validation, passed: thisPassed });
     record.history.push({ type: 'stage_attempt', stage: stage.id, attempt, passed: thisPassed }); save();
     if (thisPassed) { passed = true; break; }
     findings = currentFindings;
@@ -218,6 +234,11 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
   stage.status = 'complete';
   record.history.push({ type: 'stage_complete', stage: stage.id, at: new Date().toISOString() }); save();
   await checkpoint(repo, stage);
+}
+
+function errorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.slice(-2000);
 }
 
 async function runChecks(repo: string, config: StrataConfig): Promise<any[]> {
