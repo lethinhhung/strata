@@ -157,23 +157,24 @@ async function planEpic(config: StrataConfig, repo: string, epic: string, contex
 async function runStage(repo: string, record: RecordData, stage: Stage, config: StrataConfig, context: string, save: () => void) {
   stage.status = 'in_progress'; save();
   const contract = JSON.stringify({ stage, epic: record.epic }, null, 2);
+  const lastAttempt = stage.attempts?.at(-1);
+  let findings = lastAttempt && !lastAttempt.passed ? attemptFindings(lastAttempt) : '';
   const explore = await invokeReadOnly(config.worker, promptFor('explore_agent', {
     task: 'Investigate relevant code, tests, conventions, dependencies, and project instructions for this stage. Read only; return JSON {"summary":"...","findings":[...],"files":[...],"uncertainties":[]}.', contract, context,
   }), repo);
   const taskPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('stage_coordinator', {
-    task: 'Turn this stage into ordered, focused implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}],"validation_requirements":[...]}. Include testing and quality work in each appropriate implementation handoff; preserve the stage acceptance criteria.',
-    contract, explore, context,
+    task: 'Turn this stage into ordered, focused implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}],"validation_requirements":[...]}. Include testing and quality work in each appropriate implementation handoff; preserve the stage acceptance criteria. Keep related changes together and use at most three tasks. When prior attempt findings are present, make the plan directly address them and do not repeat rejected approaches.',
+    contract, explore, prior_attempt_findings: findings, context,
   }), repo));
   let tasks: any[] = Array.isArray(taskPlan.implementation_tasks) && taskPlan.implementation_tasks.length ? taskPlan.implementation_tasks : [{ task: stage.objective }];
   const attempts = config.workflow.implement_fix_attempts;
   let passed = false;
-  let findings = '';
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     if (attempt > 1 && findings) {
       try {
         const repairPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('stage_coordinator', {
-          task: 'Review the prior implementation, tester, and validator findings. Clarify and route the required repairs as ordered implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}]}. Keep the original stage contract authoritative.',
-          contract, findings, context,
+          task: 'Review the prior implementation, tester, and validator findings. Clarify and route the required repairs as ordered implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}]}. Keep the original stage contract authoritative. Keep related changes together and use at most three tasks; explicitly address each blocking finding.',
+          contract, findings, previous_implementation_tasks: JSON.stringify(tasks), context,
         }), repo));
         if (Array.isArray(repairPlan.implementation_tasks) && repairPlan.implementation_tasks.length) tasks = repairPlan.implementation_tasks;
       } catch (error) {
@@ -185,8 +186,9 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     for (let i = 0; i < tasks.length; i += 1) {
       try {
         implementations.push(await invoke(config.worker, promptFor('implementer', {
-          task: `Implement task ${i + 1} of ${tasks.length}. Make code changes in scope, follow project rules and specs, and do not create reports or edit specifications. Specification changes belong to the Epic Coordinator and require explicit authorization in the epic. Return a concise summary.`,
-          contract, implementation_task: tasks[i].task, previous_findings: findings, context,
+          task: `Implement task ${i + 1} of ${tasks.length}. Inspect and build on the current worktree and the supplied exploration findings. Do not claim a required file or route is missing without checking the exact path. Complete the assigned task even when it spans multiple files. Make code changes in scope, follow project rules and specs, and do not create reports or edit specifications. Specification changes belong to the Epic Coordinator and require explicit authorization in the epic. Return a concise summary of actual changes.`,
+          contract, implementation_task: tasks[i].task, task_plan: JSON.stringify(tasks), stage_exploration: explore,
+          prior_task_results: implementations.join('\n\n'), previous_findings: findings, context,
         }), repo));
       } catch (error) {
         const failure = `Implementer task ${i + 1} failed: ${errorMessage(error)}`;
@@ -217,7 +219,8 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       validation = { status: 'fail', findings: [message], summary: 'Validation did not complete successfully.' };
     }
     const testerResult = safeStatusResponse(testReport);
-    const currentFindings = [...implementationFailures, checkFailure, JSON.stringify(testerResult), JSON.stringify(validation)].filter(Boolean).join('\n');
+    const implementationSummary = implementations.map((item, index) => `Task ${index + 1}: ${item.slice(-1800)}`).join('\n');
+    const currentFindings = [implementationSummary, ...implementationFailures, checkFailure, JSON.stringify(testerResult), JSON.stringify(validation)].filter(Boolean).join('\n');
     const thisPassed = implementationFailures.length === 0 && !checkFailure && testerResult?.status === 'pass' && validation.status === 'pass';
     stage.attempts!.push({ attempt, implementations, implementation_failures: implementationFailures, checks, tester: testerResult ?? testReport, validation, passed: thisPassed });
     record.history.push({ type: 'stage_attempt', stage: stage.id, attempt, passed: thisPassed }); save();
@@ -234,6 +237,22 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
   stage.status = 'complete';
   record.history.push({ type: 'stage_complete', stage: stage.id, at: new Date().toISOString() }); save();
   await checkpoint(repo, stage);
+}
+
+function attemptFindings(attempt: any): string {
+  const sections: string[] = [];
+  for (const failure of attempt.implementation_failures ?? []) sections.push(`Implementer failure: ${String(failure)}`);
+  for (const check of attempt.checks ?? []) {
+    if (check.code !== 0) sections.push(`Check failed: ${(check.command ?? []).join(' ')}\n${String(check.output ?? '').slice(-3000)}`);
+  }
+  for (const role of ['tester', 'validation']) {
+    const result = attempt[role];
+    if (!result || result.status === 'pass') continue;
+    const findings = Array.isArray(result.findings) ? result.findings.map(String).join('\n- ') : '';
+    sections.push(`${role} findings: ${findings || result.summary || JSON.stringify(result)}`);
+  }
+  if (!sections.length) sections.push('The previous implementation attempt did not pass. Inspect the saved attempt and verify the stage criteria against the current worktree.');
+  return sections.join('\n\n').slice(-12000);
 }
 
 function errorMessage(error: unknown): string {
