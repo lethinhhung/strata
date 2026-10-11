@@ -5,6 +5,19 @@ export async function invoke(agent: AgentConfig, prompt: string, cwd: string, re
   const args = agent.provider === 'codex'
     ? ['exec', '--json', '--cd', cwd, '--sandbox', readOnly ? 'read-only' : 'workspace-write', '--config', 'approval_policy="never"', ...(agent.model ? ['--model', agent.model] : []), ...agent.extra_args, prompt]
     : ['run', '--format', 'json', '--dir', cwd, ...(agent.model ? ['--model', agent.model] : []), ...agent.extra_args, prompt];
+  const env = agent.provider === 'opencode' && readOnly
+    ? {
+        ...process.env,
+        OPENCODE_PERMISSION: JSON.stringify({
+          '*': 'deny',
+          read: 'allow',
+          glob: 'allow',
+          grep: 'allow',
+          list: 'allow',
+          lsp: 'allow',
+        }),
+      }
+    : process.env;
   const role = prompt.match(/^You are Strata's ([^.]+)\./m)?.[1] ?? `${agent.provider} agent`;
   const started = Date.now();
   console.error(`[strata] ${role} started (${agent.provider}${agent.model ? ` / ${agent.model}` : ''})`);
@@ -13,7 +26,7 @@ export async function invoke(agent: AgentConfig, prompt: string, cwd: string, re
   }, 30_000);
   let result;
   try {
-    result = await run(agent.command, args, cwd, agent.timeout_seconds * 1000);
+    result = await run(agent.command, args, cwd, agent.timeout_seconds * 1000, env);
   } finally {
     clearInterval(heartbeat);
   }
@@ -60,9 +73,9 @@ function openCodeText(output: string): string {
   return messages.join('\n') || output;
 }
 
-export function run(command: string, args: string[], cwd: string, timeout: number): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }> {
+export function run(command: string, args: string[], cwd: string, timeout: number, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number | null; stdout: string; stderr: string; timedOut: boolean }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let settled = false;
