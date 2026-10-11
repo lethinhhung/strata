@@ -158,14 +158,15 @@ async function planEpic(config: StrataConfig, repo: string, epic: string, contex
 async function runStage(repo: string, record: RecordData, stage: Stage, config: StrataConfig, context: string, save: () => void) {
   stage.status = 'in_progress'; save();
   const contract = JSON.stringify({ stage, epic: record.epic }, null, 2);
+  const stageContext = `${context}\n\n${relevantSourceContext(repo, stage)}`;
   const lastAttempt = stage.attempts?.at(-1);
   let findings = lastAttempt && !lastAttempt.passed ? attemptFindings(lastAttempt) : '';
   const explore = await invokeReadOnly(config.worker, promptFor('explore_agent', {
-    task: 'Investigate relevant code, tests, conventions, dependencies, and project instructions for this stage. Read only; return JSON {"summary":"...","findings":[...],"files":[...],"uncertainties":[]}.', contract, context,
+    task: 'Investigate relevant code, tests, conventions, dependencies, and project instructions for this stage. Read the stage-specific source excerpts and verify them against the repository. Read only; return JSON {"summary":"...","findings":[...],"files":[...],"uncertainties":[]}.', contract, context: stageContext,
   }), repo);
   const taskPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('stage_coordinator', {
     task: 'Turn this stage into ordered, focused implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}],"validation_requirements":[...]}. Include testing and quality work in each appropriate implementation handoff; preserve the stage acceptance criteria. Keep related changes together and use at most three tasks. When prior attempt findings are present, make the plan directly address them and do not repeat rejected approaches.',
-    contract, explore, prior_attempt_findings: findings, context,
+    contract, explore, prior_attempt_findings: findings, context: stageContext,
   }), repo));
   let tasks: any[] = Array.isArray(taskPlan.implementation_tasks) && taskPlan.implementation_tasks.length ? taskPlan.implementation_tasks : [{ task: stage.objective }];
   const attempts = config.workflow.implement_fix_attempts;
@@ -175,7 +176,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       try {
         const repairPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('stage_coordinator', {
           task: 'Review the prior implementation, tester, and validator findings. Clarify and route the required repairs as ordered implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}]}. Keep the original stage contract authoritative. Keep related changes together and use at most three tasks; explicitly address each blocking finding.',
-          contract, findings, previous_implementation_tasks: JSON.stringify(tasks), context,
+          contract, findings, previous_implementation_tasks: JSON.stringify(tasks), context: stageContext,
         }), repo));
         if (Array.isArray(repairPlan.implementation_tasks) && repairPlan.implementation_tasks.length) tasks = repairPlan.implementation_tasks;
       } catch (error) {
@@ -189,7 +190,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
         implementations.push(await invoke(config.worker, promptFor('implementer', {
           task: `Implement task ${i + 1} of ${tasks.length}. Inspect and build on the current worktree and the supplied exploration findings. Use the repository file index in project context to locate existing routes and components; verify exact paths before claiming something is missing, and extend existing code instead of creating a duplicate. Complete the assigned task even when it spans multiple files. Do not stop at a plan, apology, or claim that the work is too large: make the scoped code changes. Follow project rules and specs, and do not create reports or edit specifications. Specification changes belong to the Epic Coordinator and require explicit authorization in the epic. Return a concise summary of actual changes.`,
           contract, implementation_task: tasks[i].task, task_plan: JSON.stringify(tasks), stage_exploration: explore,
-          prior_task_results: implementations.join('\n\n'), previous_findings: findings, context,
+          prior_task_results: implementations.join('\n\n'), previous_findings: findings, context: stageContext,
         }), repo));
       } catch (error) {
         const failure = `Implementer task ${i + 1} failed: ${errorMessage(error)}`;
@@ -202,7 +203,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     try {
       testReport = await invoke(config.worker, promptFor('tester', {
         task: 'Review the implementation and the automated check results already provided. Do not rerun the configured full check suite; Strata runs it automatically before and after this review. Run only a narrowly focused check if needed to diagnose a specific failure, and fix failures introduced by this implementation. Do not edit specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":[...],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail".',
-        contract, implementation: implementations.join('\n'), checks: JSON.stringify(checks), previous_findings: findings, context,
+        contract, implementation: implementations.join('\n'), checks: JSON.stringify(checks), previous_findings: findings, context: stageContext,
       }), repo);
     } catch (error) {
       testReport = JSON.stringify({ status: 'fail', findings: [`Tester process failed: ${errorMessage(error)}`], summary: 'Tester did not complete.' });
@@ -213,7 +214,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     try {
       validation = statusResponse(await invokeReadOnly(config.worker, promptFor('validator', {
         task: 'Read-only validation. Compare the repository against the stage criteria and applicable specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail". Do not edit files.',
-        contract, implementation: implementations.join('\n'), test_report: testReport, check_failure: checkFailure, context,
+        contract, implementation: implementations.join('\n'), test_report: testReport, check_failure: checkFailure, context: stageContext,
       }), repo));
     } catch (error) {
       const message = error instanceof ReadOnlyMutationError ? error.message : `Validator process failed: ${errorMessage(error)}`;
@@ -388,6 +389,35 @@ async function pushCurrentBranch(repo: string) {
   const remote = defaultRemote || (availableRemotes.includes('origin') ? 'origin' : availableRemotes[0]);
   if (!remote) return { code: 1, stdout: '', stderr: 'Cannot push because this repository has no configured remote.', timedOut: false };
   return run('git', ['push', '--set-upstream', remote, branch], repo, 120000);
+}
+
+function relevantSourceContext(repo: string, stage: Stage): string {
+  const listed = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: repo, encoding: 'utf8' });
+  if (listed.status !== 0) return '--- Stage source excerpts ---\nUnable to list repository files.';
+  const stopWords = new Set(['about', 'action', 'after', 'also', 'and', 'available', 'based', 'completion', 'criteria', 'current', 'from', 'into', 'must', 'only', 'repository', 'stage', 'that', 'their', 'this', 'through', 'users', 'using', 'when', 'with']);
+  const terms = [...new Set(`${stage.id} ${stage.title} ${stage.objective} ${stage.completion_criteria.join(' ')}`
+    .toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? [])].filter((term) => !stopWords.has(term));
+  const sourcePaths = listed.stdout.split('\n').filter((file) => /\.(?:[cm]?[jt]sx?|swift|kt|java|py|go|rs)$/.test(file)
+    && /^(?:app|apps|src|source|lib|test|tests|packages)\//.test(file));
+  const ranked = sourcePaths.map((file) => {
+    const normalized = file.toLowerCase();
+    const score = terms.reduce((total, term) => total + (normalized.includes(term) ? (path.basename(normalized).includes(term) ? 3 : 1) : 0), 0);
+    return { file, score };
+  }).filter((item) => item.score > 0).sort((left, right) => right.score - left.score || left.file.localeCompare(right.file));
+  const excerpts: string[] = [];
+  let remaining = 24000;
+  for (const { file } of ranked.slice(0, 12)) {
+    if (remaining <= 0) break;
+    try {
+      const content = fs.readFileSync(path.join(repo, file), 'utf8');
+      const excerpt = content.slice(0, Math.min(6000, remaining));
+      excerpts.push(`--- ${file}${content.length > excerpt.length ? ' (truncated)' : ''} ---\n${excerpt}`);
+      remaining -= excerpt.length;
+    } catch { /* A file may disappear while the run is active. */ }
+  }
+  return excerpts.length
+    ? `--- Stage source excerpts (current repository contents; verify against these before reporting missing files) ---\n${excerpts.join('\n\n')}`
+    : '--- Stage source excerpts ---\nNo matching source files were found in the repository file index.';
 }
 
 function projectContext(repo: string, config: StrataConfig): string {
