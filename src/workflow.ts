@@ -445,8 +445,8 @@ function relevantSourceContext(repo: string, stage: Stage): string {
     return { file, score };
   }).filter((item) => item.score > 0).sort((left, right) => right.score - left.score || left.file.localeCompare(right.file));
   const excerpts: string[] = [];
-  let remaining = 24000;
-  for (const { file } of ranked.slice(0, 12)) {
+  let remaining = 10000;
+  for (const { file } of ranked.slice(0, 8)) {
     if (remaining <= 0) break;
     try {
       const content = fs.readFileSync(path.join(repo, file), 'utf8');
@@ -487,7 +487,7 @@ function projectContext(repo: string, config: StrataConfig): string {
       chunks.push(`--- ${path.relative(repo, file)} (advisory memory) ---\n${fs.readFileSync(file, 'utf8').slice(0, 8000)}`);
     }
   }
-  return chunks.join('\n\n').slice(0, 80000) || '(No project specs or rules were found.)';
+  return chunks.join('\n\n').slice(0, 12000) || '(No project specs or rules were found.)';
 }
 
 function walk(dir: string): string[] {

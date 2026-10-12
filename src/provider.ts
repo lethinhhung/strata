@@ -2,9 +2,10 @@ import { spawn } from 'node:child_process';
 import type { AgentConfig } from './config.js';
 
 export async function invoke(agent: AgentConfig, prompt: string, cwd: string, readOnly = false): Promise<string> {
+  const effectivePrompt = agent.provider === 'opencode' ? fitPrompt(prompt, 18000) : prompt;
   const args = agent.provider === 'codex'
-    ? ['exec', '--json', '--cd', cwd, '--sandbox', readOnly ? 'read-only' : 'workspace-write', '--config', 'approval_policy="never"', ...(agent.model ? ['--model', agent.model] : []), ...agent.extra_args, prompt]
-    : ['run', '--format', 'json', '--dir', cwd, ...(agent.model ? ['--model', agent.model] : []), ...agent.extra_args, prompt];
+    ? ['exec', '--json', '--cd', cwd, '--sandbox', readOnly ? 'read-only' : 'workspace-write', '--config', 'approval_policy="never"', ...(agent.model ? ['--model', agent.model] : []), ...agent.extra_args, effectivePrompt]
+    : ['run', '--format', 'json', '--dir', cwd, ...(agent.model ? ['--model', agent.model] : []), ...agent.extra_args, effectivePrompt];
   const env = agent.provider === 'opencode' && readOnly
     ? {
         ...process.env,
@@ -19,6 +20,9 @@ export async function invoke(agent: AgentConfig, prompt: string, cwd: string, re
       }
     : process.env;
   const role = prompt.match(/^You are Strata's ([^.]+)\./m)?.[1] ?? `${agent.provider} agent`;
+  if (effectivePrompt.length < prompt.length) {
+    console.error(`[strata] shortened ${role} prompt by ${prompt.length - effectivePrompt.length} characters to fit the OpenCode context budget`);
+  }
   const started = Date.now();
   console.error(`[strata] ${role} started (${agent.provider}${agent.model ? ` / ${agent.model}` : ''})`);
   const heartbeat = setInterval(() => {
@@ -36,6 +40,13 @@ export async function invoke(agent: AgentConfig, prompt: string, cwd: string, re
   if (!text.trim()) throw new Error(`${agent.provider} returned no agent response`);
   console.error(`[strata] ${role} completed in ${Math.floor((Date.now() - started) / 1000)}s`);
   return text;
+}
+
+function fitPrompt(prompt: string, maxLength: number): string {
+  if (prompt.length <= maxLength) return prompt;
+  const headLength = Math.floor(maxLength * 0.7);
+  const tailLength = maxLength - headLength;
+  return `${prompt.slice(0, headLength)}\n\n[Strata omitted ${prompt.length - maxLength} characters of lower-priority context to fit the worker's input limit.]\n\n${prompt.slice(-tailLength)}`;
 }
 
 export function jsonResponse(text: string): any {
