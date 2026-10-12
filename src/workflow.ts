@@ -193,7 +193,12 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       };
       const implementationPrompt = promptFor('implementer', values);
       try {
-        implementations.push(await invoke(config.worker, implementationPrompt, repo));
+        const response = await invoke(config.worker, implementationPrompt, repo);
+        if (config.worker.provider !== config.strong.provider || config.worker.model !== config.strong.model) {
+          const refusal = implementationRefusal(response);
+          if (refusal) throw new Error(`Worker returned a refusal instead of implementing: ${refusal}`);
+        }
+        implementations.push(response);
       } catch (error) {
         const primaryFailure = `Implementer task ${i + 1} failed on ${config.worker.provider}: ${errorMessage(error)}`;
         if (config.worker.provider === config.strong.provider && config.worker.model === config.strong.model) {
@@ -204,7 +209,10 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
         console.error(`[strata] recovering failed implementer task ${i + 1} with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
         try {
           const recoveryPrompt = `${implementationPrompt}\n\n## Recovery handoff\nThe configured worker process failed before completing this task: ${errorMessage(error)}\nTake over implementation now. Inspect the current worktree, make the requested code changes, and return a concise summary of actual changes.`;
-          implementations.push(await invoke(config.strong, recoveryPrompt, repo));
+          const response = await invoke(config.strong, recoveryPrompt, repo);
+          const refusal = implementationRefusal(response);
+          if (refusal) throw new Error(`Strong agent returned a refusal instead of implementing: ${refusal}`);
+          implementations.push(response);
         } catch (recoveryError) {
           const failure = `${primaryFailure}\nStrong-agent recovery also failed: ${errorMessage(recoveryError)}`;
           implementationFailures.push(failure);
@@ -536,6 +544,20 @@ function statusResponse(text: string): any {
     ? []
     : findingText.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean);
   return { status, findings, summary: values.get('summary') ?? '' };
+}
+
+function implementationRefusal(text: string): string | undefined {
+  const patterns = [
+    /\b(?:i|we) (?:can(?:not|'t)|cannot|don't have permission to|do not have permission to) (?:edit|modify|change|write|update|access)\b/i,
+    /\b(?:the environment|this environment|the tooling|this tooling) (?:does not|doesn't) (?:provide|expose|allow) (?:a |direct )?(?:file[- ]edit|edit|write)\b/i,
+    /\bplease (?:apply|make) (?:the |these |those )?(?:changes|edits|patch(?:es)?)\b/i,
+    /\bif you(?:'d| would) like me to (?:apply|make|implement) (?:the |these |those )?(?:changes|edits)\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) return match[0];
+  }
+  return undefined;
 }
 
 function safeStatusResponse(text: string): any {
