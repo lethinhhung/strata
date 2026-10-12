@@ -47,9 +47,9 @@ export async function startRun(repo: string, epic: string, epicFile: string, con
       : [{ question: 'Inspect the repository specifications, conventions, and implementation areas relevant to this epic.' }];
     const initialFindings: string[] = [];
     for (const item of explorationTasks) {
-      initialFindings.push(await invokeReadOnly(config.worker, promptFor('explore_agent', {
+      initialFindings.push(clip(await invokeReadOnly(config.worker, promptFor('explore_agent', {
         task: String(item.question ?? item.task ?? 'Inspect the repository areas relevant to this epic and report findings.'), epic, context,
-      }), repo));
+      }), repo), 6000));
     }
     const plan = await planEpic(config, repo, epic, context, initialFindings.join('\n\n'));
     if (plan.blockers.length) {
@@ -108,9 +108,9 @@ export async function resumeRun(repo: string, reference: string, config: StrataC
         : [{ question: 'Inspect repository specifications, conventions, and implementation areas relevant to this epic.' }];
       const findings: string[] = [];
       for (const item of explorationTasks) {
-        findings.push(await invokeReadOnly(config.worker, promptFor('explore_agent', {
+        findings.push(clip(await invokeReadOnly(config.worker, promptFor('explore_agent', {
           task: String(item.question ?? item.task ?? 'Inspect the repository areas relevant to this epic.'), epic: record.epic, context,
-        }), repo));
+        }), repo), 6000));
       }
       const plan = await planEpic(config, repo, record.epic, context, findings.join('\n\n'));
       if (plan.blockers.length) {
@@ -158,12 +158,12 @@ async function planEpic(config: StrataConfig, repo: string, epic: string, contex
 async function runStage(repo: string, record: RecordData, stage: Stage, config: StrataConfig, context: string, save: () => void) {
   stage.status = 'in_progress'; save();
   const contract = JSON.stringify({ stage, epic: record.epic }, null, 2);
-  const stageContext = `${context}\n\n${relevantSourceContext(repo, stage)}`;
+  const stageContext = `${clip(relevantSourceContext(repo, stage), 8000)}\n\n${clip(context, 5000)}`;
   const lastAttempt = stage.attempts?.at(-1);
-  let findings = lastAttempt && !lastAttempt.passed ? attemptFindings(lastAttempt) : '';
-  const explore = await invokeReadOnly(config.worker, promptFor('explore_agent', {
+  let findings = lastAttempt && !lastAttempt.passed ? clip(attemptFindings(lastAttempt), 6000) : '';
+  const explore = clip(await invokeReadOnly(config.worker, promptFor('explore_agent', {
     task: 'Investigate relevant code, tests, conventions, dependencies, and project instructions for this stage. Read the stage-specific source excerpts and verify them against the repository. Read only; return JSON {"summary":"...","findings":[...],"files":[...],"uncertainties":[]}.', contract, context: stageContext,
-  }), repo);
+  }), repo), 7000);
   const taskPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('stage_coordinator', {
     task: 'Turn this stage into ordered, focused implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}],"validation_requirements":[...]}. Include testing and quality work in each appropriate implementation handoff; preserve the stage acceptance criteria. Keep related changes together and use at most three tasks. When prior attempt findings are present, make the plan directly address them and do not repeat rejected approaches.',
     contract, explore, prior_attempt_findings: findings, context: stageContext,
@@ -189,7 +189,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       const values = {
         task: `Implement task ${i + 1} of ${tasks.length}. Inspect and build on the current worktree and the supplied exploration findings. Use the repository file index in project context to locate existing routes and components; verify exact paths before claiming something is missing, and extend existing code instead of creating a duplicate. Complete the assigned task even when it spans multiple files. Do not stop at a plan, apology, or claim that the work is too large: make the scoped code changes. Follow project rules and specs, and do not create reports or edit specifications. Specification changes belong to the Epic Coordinator and require explicit authorization in the epic. Return a concise summary of actual changes.`,
         contract, implementation_task: tasks[i].task, task_plan: JSON.stringify(tasks), stage_exploration: explore,
-        prior_task_results: implementations.join('\n\n'), previous_findings: findings, context: stageContext,
+        prior_task_results: clip(implementations.join('\n\n'), 2500), previous_findings: clip(findings, 4000), context: clip(stageContext, 6000),
       };
       const implementationPrompt = promptFor('implementer', values);
       try {
@@ -198,7 +198,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
           const refusal = implementationRefusal(response);
           if (refusal) throw new Error(`Worker returned a refusal instead of implementing: ${refusal}`);
         }
-        implementations.push(response);
+        implementations.push(clip(response, 4000));
       } catch (error) {
         const primaryFailure = `Implementer task ${i + 1} failed on ${config.worker.provider}: ${errorMessage(error)}`;
         if (config.worker.provider === config.strong.provider && config.worker.model === config.strong.model) {
@@ -212,7 +212,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
           const response = await invoke(config.strong, recoveryPrompt, repo);
           const refusal = implementationRefusal(response);
           if (refusal) throw new Error(`Strong agent returned a refusal instead of implementing: ${refusal}`);
-          implementations.push(response);
+          implementations.push(clip(response, 4000));
         } catch (recoveryError) {
           const failure = `${primaryFailure}\nStrong-agent recovery also failed: ${errorMessage(recoveryError)}`;
           implementationFailures.push(failure);
@@ -234,7 +234,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       contract, implementation: implementationReview, checks: JSON.stringify(checkReview), previous_findings: clip(findings, 5000), context: reviewContext,
     });
     try {
-      testReport = await invoke(config.worker, testerPrompt, repo);
+      testReport = clip(await invoke(config.worker, testerPrompt, repo), 6000);
     } catch (error) {
       const workerAndStrongMatch = config.worker.provider === config.strong.provider && config.worker.model === config.strong.model;
       if (workerAndStrongMatch) {
@@ -242,7 +242,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       } else {
         console.error(`[strata] recovering failed tester with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
         try {
-          testReport = await invoke(config.strong, `${testerPrompt}\n\n## Recovery handoff\nThe configured tester process failed before reviewing this implementation: ${errorMessage(error)}\nReview the supplied results and complete the requested testing review.`, repo);
+          testReport = clip(await invoke(config.strong, `${testerPrompt}\n\n## Recovery handoff\nThe configured tester process failed before reviewing this implementation: ${errorMessage(error)}\nReview the supplied results and complete the requested testing review.`, repo), 6000);
         } catch (recoveryError) {
           testReport = JSON.stringify({ status: 'fail', findings: [`Tester process failed: ${errorMessage(error)}`, `Strong-agent recovery failed: ${errorMessage(recoveryError)}`], summary: 'Tester did not complete.' });
         }
@@ -275,7 +275,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     task: `Record durable decisions, notes, and progress under ${config.workflow.memory_path}. Keep notes factual and concise.`,
     contract, stage_results: JSON.stringify(stage.attempts), context,
   }), repo);
-  record.history.push({ type: 'archive', stage: stage.id, result: archive });
+  record.history.push({ type: 'archive', stage: stage.id, result: clip(archive, 4000) });
   stage.status = 'complete';
   record.history.push({ type: 'stage_complete', stage: stage.id, at: new Date().toISOString() }); save();
   await checkpoint(repo, stage);
