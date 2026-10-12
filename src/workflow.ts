@@ -221,14 +221,32 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       }
     }
     let checks = await runChecks(repo, config);
+    const implementationReview = implementations.map((item, index) => `Task ${index + 1}: ${clip(item, 1800)}`).join('\n\n');
+    const checkReview = checks.map((check) => ({
+      command: check.command.join(' '),
+      passed: check.code === 0,
+      output: check.output ? clip(check.output, check.code === 0 ? 500 : 1800) : '',
+    }));
+    const reviewContext = clip(stageContext, 10000);
     let testReport: string;
+    const testerPrompt = promptFor('tester', {
+      task: 'Review the implementation and automated check results already provided. Do not rerun the configured full check suite; Strata runs it automatically before and after this review. Run only a narrowly focused check if needed to diagnose a specific failure, and fix failures introduced by this implementation. Do not edit specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":[...],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail".',
+      contract, implementation: implementationReview, checks: JSON.stringify(checkReview), previous_findings: clip(findings, 5000), context: reviewContext,
+    });
     try {
-      testReport = await invoke(config.worker, promptFor('tester', {
-        task: 'Review the implementation and the automated check results already provided. Do not rerun the configured full check suite; Strata runs it automatically before and after this review. Run only a narrowly focused check if needed to diagnose a specific failure, and fix failures introduced by this implementation. Do not edit specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":[...],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail".',
-        contract, implementation: implementations.join('\n'), checks: JSON.stringify(checks), previous_findings: findings, context: stageContext,
-      }), repo);
+      testReport = await invoke(config.worker, testerPrompt, repo);
     } catch (error) {
-      testReport = JSON.stringify({ status: 'fail', findings: [`Tester process failed: ${errorMessage(error)}`], summary: 'Tester did not complete.' });
+      const workerAndStrongMatch = config.worker.provider === config.strong.provider && config.worker.model === config.strong.model;
+      if (workerAndStrongMatch) {
+        testReport = JSON.stringify({ status: 'fail', findings: [`Tester process failed: ${errorMessage(error)}`], summary: 'Tester did not complete.' });
+      } else {
+        console.error(`[strata] recovering failed tester with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
+        try {
+          testReport = await invoke(config.strong, `${testerPrompt}\n\n## Recovery handoff\nThe configured tester process failed before reviewing this implementation: ${errorMessage(error)}\nReview the supplied results and complete the requested testing review.`, repo);
+        } catch (recoveryError) {
+          testReport = JSON.stringify({ status: 'fail', findings: [`Tester process failed: ${errorMessage(error)}`, `Strong-agent recovery failed: ${errorMessage(recoveryError)}`], summary: 'Tester did not complete.' });
+        }
+      }
     }
     checks = await runChecks(repo, config);
     const checkFailure = checks.filter((c) => c.code !== 0).map((c) => `${c.command.join(' ')} failed (${c.code})\n${c.output}`).join('\n');
@@ -236,7 +254,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     try {
       validation = statusResponse(await invokeReadOnly(config.worker, promptFor('validator', {
         task: 'Read-only validation. Compare the repository against the stage criteria and applicable specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail". Do not edit files.',
-        contract, implementation: implementations.join('\n'), test_report: testReport, check_failure: checkFailure, context: stageContext,
+        contract, implementation: implementationReview, test_report: clip(testReport, 6000), check_failure: clip(checkFailure, 4000), context: reviewContext,
       }), repo));
     } catch (error) {
       const message = error instanceof ReadOnlyMutationError ? error.message : `Validator process failed: ${errorMessage(error)}`;
@@ -558,6 +576,13 @@ function implementationRefusal(text: string): string | undefined {
     if (match) return match[0];
   }
   return undefined;
+}
+
+function clip(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  const headLength = Math.ceil(maxLength * 0.75);
+  const tailLength = maxLength - headLength;
+  return `${value.slice(0, headLength)}\n… [${value.length - maxLength} characters omitted] …\n${value.slice(-tailLength)}`;
 }
 
 function safeStatusResponse(text: string): any {
