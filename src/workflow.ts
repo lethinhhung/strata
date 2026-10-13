@@ -13,6 +13,25 @@ type WorkspaceSnapshot = { files: Map<string, WorkspaceFile>; indexPath: string;
 
 class ReadOnlyMutationError extends Error {}
 
+async function timedStep<T>(label: string, action: () => Promise<T>): Promise<T> {
+  const started = Date.now();
+  console.error(`[strata] ${label}...`);
+  try {
+    const result = await action();
+    console.error(`[strata] ${label} completed in ${formatDuration(Date.now() - started)}`);
+    return result;
+  } catch (error) {
+    console.error(`[strata] ${label} failed after ${formatDuration(Date.now() - started)}: ${errorMessage(error)}`);
+    throw error;
+  }
+}
+
+function formatDuration(milliseconds: number): string {
+  const seconds = Math.floor(milliseconds / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 export async function startRun(repo: string, epic: string, epicFile: string, config: StrataConfig): Promise<RecordData> {
   const gitRoot = await run('git', ['rev-parse', '--show-toplevel'], repo, 10000);
   if (gitRoot.code !== 0) throw new Error(`Target repository is not a Git worktree: ${repo}`);
@@ -38,20 +57,20 @@ export async function startRun(repo: string, epic: string, epicFile: string, con
   save();
   try {
     const context = projectContext(repo, config);
-    const explorationPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('epic_coordinator', {
+    const explorationPlan = jsonResponse(await timedStep('Plan repository exploration', () => invokeReadOnly(config.strong, promptFor('epic_coordinator', {
       task: 'Identify up to three focused repository exploration questions needed to plan the epic. Do not plan stages or implement. Return JSON {"exploration_tasks":[{"question":"..."}]}.',
       epic, context,
-    }), repo));
+    }), repo)));
     const explorationTasks: any[] = Array.isArray(explorationPlan.exploration_tasks) && explorationPlan.exploration_tasks.length
       ? explorationPlan.exploration_tasks.slice(0, 3)
       : [{ question: 'Inspect the repository specifications, conventions, and implementation areas relevant to this epic.' }];
     const initialFindings: string[] = [];
     for (const item of explorationTasks) {
-      initialFindings.push(clip(await exploreWithRecovery(config, promptFor('explore_agent', {
+      initialFindings.push(clip(await timedStep(`Explore epic (${initialFindings.length + 1}/${explorationTasks.length})`, () => exploreWithRecovery(config, promptFor('explore_agent', {
         task: String(item.question ?? item.task ?? 'Inspect the repository areas relevant to this epic and report findings.'), epic, context,
-      }), repo), 6000));
+      }), repo)), 6000));
     }
-    const plan = await planEpic(config, repo, epic, context, initialFindings.join('\n\n'));
+    const plan = await timedStep('Plan implementation stages', () => planEpic(config, repo, epic, context, initialFindings.join('\n\n')));
     if (plan.blockers.length) {
       record.blockers = plan.blockers;
       record.status = 'blocked';
@@ -71,12 +90,12 @@ export async function startRun(repo: string, epic: string, epicFile: string, con
     for (const stage of record.stages) {
       const incomplete = stage.dependencies.filter((dep) => !record.stages.some((item) => item.id === dep && item.status === 'complete'));
       if (incomplete.length) throw new Error(`Stage ${stage.id} has incomplete dependencies: ${incomplete.join(', ')}`);
-      await runStage(repo, record, stage, config, context, save);
+      await timedStep(`Stage ${stage.id}: ${stage.title}`, () => runStage(repo, record, stage, config, context, save));
     }
     record.status = 'complete';
     record.history.push({ type: 'complete', at: new Date().toISOString() });
     save();
-    await finalizeRecord(repo);
+    await timedStep('Finalize run checkpoint', () => finalizeRecord(repo));
     return record;
   } catch (error) {
     record.status = 'failed'; record.error = error instanceof Error ? error.message : String(error); save();
@@ -99,20 +118,20 @@ export async function resumeRun(repo: string, reference: string, config: StrataC
     if (!record.stages.length || (wasBlocked && !record.stages.some((stage) => stage.status === 'complete'))) {
       record.blockers = [];
       record.stages = [];
-      const explorationPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('epic_coordinator', {
+      const explorationPlan = jsonResponse(await timedStep('Plan repository exploration', () => invokeReadOnly(config.strong, promptFor('epic_coordinator', {
         task: 'Identify up to three focused repository exploration questions needed to plan this epic. Return JSON {"exploration_tasks":[{"question":"..."}]}. Do not implement.',
         epic: record.epic, context,
-      }), repo));
+      }), repo)));
       const explorationTasks: any[] = Array.isArray(explorationPlan.exploration_tasks) && explorationPlan.exploration_tasks.length
         ? explorationPlan.exploration_tasks.slice(0, 3)
         : [{ question: 'Inspect repository specifications, conventions, and implementation areas relevant to this epic.' }];
       const findings: string[] = [];
       for (const item of explorationTasks) {
-        findings.push(clip(await exploreWithRecovery(config, promptFor('explore_agent', {
+        findings.push(clip(await timedStep(`Explore epic (${findings.length + 1}/${explorationTasks.length})`, () => exploreWithRecovery(config, promptFor('explore_agent', {
           task: String(item.question ?? item.task ?? 'Inspect the repository areas relevant to this epic.'), epic: record.epic, context,
-        }), repo), 6000));
+        }), repo)), 6000));
       }
-      const plan = await planEpic(config, repo, record.epic, context, findings.join('\n\n'));
+      const plan = await timedStep('Plan implementation stages', () => planEpic(config, repo, record.epic, context, findings.join('\n\n')));
       if (plan.blockers.length) {
         record.blockers = plan.blockers;
         record.status = 'blocked';
@@ -134,14 +153,14 @@ export async function resumeRun(repo: string, reference: string, config: StrataC
       const incomplete = stage.dependencies.filter((dep) => !record.stages.some((item) => item.id === dep && item.status === 'complete'));
       if (incomplete.length) throw new Error(`Stage ${stage.id} has incomplete dependencies: ${incomplete.join(', ')}`);
       if (stage.status === 'checkpoint_pending') {
-        await completeStage(repo, record, stage, save);
+        await timedStep(`Checkpoint stage ${stage.id}`, () => completeStage(repo, record, stage, save));
         continue;
       }
       stage.status = 'pending';
-      await runStage(repo, record, stage, config, context, save);
+      await timedStep(`Stage ${stage.id}: ${stage.title}`, () => runStage(repo, record, stage, config, context, save));
     }
     record.status = 'complete'; record.history.push({ type: 'complete', at: new Date().toISOString() }); save();
-    await finalizeRecord(repo);
+    await timedStep('Finalize run checkpoint', () => finalizeRecord(repo));
     return record;
   } catch (error) {
     record.status = 'failed'; record.error = error instanceof Error ? error.message : String(error); save(); throw error;
@@ -176,23 +195,23 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
   const stageContext = `${clip(relevantSourceContext(repo, stage), 8000)}\n\n${clip(context, 5000)}`;
   const lastAttempt = stage.attempts?.at(-1);
   let findings = lastAttempt && !lastAttempt.passed ? clip(attemptFindings(lastAttempt), 6000) : '';
-  const explore = clip(await exploreWithRecovery(config, promptFor('explore_agent', {
+  const explore = clip(await timedStep(`Stage ${stage.id}: explore`, () => exploreWithRecovery(config, promptFor('explore_agent', {
     task: 'Investigate relevant code, tests, conventions, dependencies, and project instructions for this stage. Read the stage-specific source excerpts and verify them against the repository. Read only; return JSON {"summary":"...","findings":[...],"files":[...],"uncertainties":[]}.', contract, context: stageContext,
-  }), repo), 7000);
-  const taskPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('stage_coordinator', {
+  }), repo)), 7000);
+  const taskPlan = jsonResponse(await timedStep(`Stage ${stage.id}: plan tasks`, () => invokeReadOnly(config.strong, promptFor('stage_coordinator', {
     task: 'Turn this stage into ordered, focused implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}],"validation_requirements":[...]}. Include testing and quality work in each appropriate implementation handoff; preserve the stage acceptance criteria. Keep related changes together and use at most three tasks. When prior attempt findings are present, make the plan directly address them and do not repeat rejected approaches.',
     contract, explore, prior_attempt_findings: findings, context: stageContext,
-  }), repo));
+  }), repo)));
   let tasks: any[] = Array.isArray(taskPlan.implementation_tasks) && taskPlan.implementation_tasks.length ? taskPlan.implementation_tasks : [{ task: stage.objective }];
   const attempts = config.workflow.implement_fix_attempts;
   let passed = false;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     if (attempt > 1 && findings) {
       try {
-        const repairPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('stage_coordinator', {
+        const repairPlan = jsonResponse(await timedStep(`Stage ${stage.id}: plan repairs`, () => invokeReadOnly(config.strong, promptFor('stage_coordinator', {
           task: 'Review the prior implementation, tester, and validator findings. Clarify and route the required repairs as ordered implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}]}. Keep the original stage contract authoritative. Keep related changes together and use at most three tasks; explicitly address each blocking finding.',
           contract, findings, previous_implementation_tasks: JSON.stringify(tasks), context: stageContext,
-        }), repo));
+        }), repo)));
         if (Array.isArray(repairPlan.implementation_tasks) && repairPlan.implementation_tasks.length) tasks = repairPlan.implementation_tasks;
       } catch (error) {
         findings += `\nStage Coordinator repair planning failed; retrying the previous implementation tasks. ${errorMessage(error)}`;
@@ -208,7 +227,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       };
       const implementationPrompt = promptFor('implementer', values);
       try {
-        const response = await invoke(config.worker, implementationPrompt, repo);
+        const response = await timedStep(`Stage ${stage.id}: implement task ${i + 1}/${tasks.length}`, () => invoke(config.worker, implementationPrompt, repo));
         if (config.worker.provider !== config.strong.provider || config.worker.model !== config.strong.model) {
           const refusal = implementationRefusal(response);
           if (refusal) throw new Error(`Worker returned a refusal instead of implementing: ${refusal}`);
@@ -224,7 +243,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
         console.error(`[strata] recovering failed implementer task ${i + 1} with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
         try {
           const recoveryPrompt = `${implementationPrompt}\n\n## Recovery handoff\nThe configured worker process failed before completing this task: ${errorMessage(error)}\nTake over implementation now. Inspect the current worktree, make the requested code changes, and return a concise summary of actual changes.`;
-          const response = await invoke(config.strong, recoveryPrompt, repo);
+          const response = await timedStep(`Stage ${stage.id}: recover task ${i + 1}`, () => invoke(config.strong, recoveryPrompt, repo));
           const refusal = implementationRefusal(response);
           if (refusal) throw new Error(`Strong agent returned a refusal instead of implementing: ${refusal}`);
           implementations.push(clip(response, 4000));
@@ -235,7 +254,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
         }
       }
     }
-    let checks = await runChecks(repo, config);
+    let checks = await timedStep(`Stage ${stage.id}: checks (attempt ${attempt})`, () => runChecks(repo, config));
     // Agent output may contain long tool transcripts. Reviewers need a concise
     // handoff, not those transcripts repeated alongside the source context.
     const implementationReview = implementations.map((item, index) => `Task ${index + 1}: ${item.slice(-800)}`).join('\n\n');
@@ -251,7 +270,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       contract, implementation: implementationReview, checks: JSON.stringify(checkReview), previous_findings: clip(findings, 800), context: reviewContext,
     });
     try {
-      testReport = clip(await invoke(config.worker, testerPrompt, repo), 6000);
+      testReport = clip(await timedStep(`Stage ${stage.id}: tester review (attempt ${attempt})`, () => invoke(config.worker, testerPrompt, repo)), 6000);
     } catch (error) {
       const workerAndStrongMatch = config.worker.provider === config.strong.provider && config.worker.model === config.strong.model;
       if (workerAndStrongMatch) {
@@ -259,7 +278,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       } else {
         console.error(`[strata] recovering failed tester with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
         try {
-          testReport = clip(await invoke(config.strong, `${testerPrompt}\n\n## Recovery handoff\nThe configured tester process failed before reviewing this implementation: ${errorMessage(error)}\nReview the supplied results and complete the requested testing review.`, repo), 6000);
+          testReport = clip(await timedStep(`Stage ${stage.id}: recover tester review`, () => invoke(config.strong, `${testerPrompt}\n\n## Recovery handoff\nThe configured tester process failed before reviewing this implementation: ${errorMessage(error)}\nReview the supplied results and complete the requested testing review.`, repo)), 6000);
         } catch (recoveryError) {
           testReport = JSON.stringify({ status: 'fail', findings: [`Tester process failed: ${errorMessage(error)}`, `Strong-agent recovery failed: ${errorMessage(recoveryError)}`], summary: 'Tester did not complete.' });
         }
@@ -269,10 +288,10 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     if (shouldRecoverReview(testerResult) && !sameAgent(config.worker, config.strong)) {
       console.error(`[strata] recovering inconclusive tester review with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
       try {
-        const recovery = await invoke(config.strong, promptFor('tester', {
+        const recovery = await timedStep(`Stage ${stage.id}: recover inconclusive tester review`, () => invoke(config.strong, promptFor('tester', {
           task: 'Independently review the supplied stage criteria, implementation summary, and completed automated checks. The first tester response was malformed or inconclusive. Do not assume warnings mean failure when every check exited successfully. Identify only concrete, evidence-backed mismatches; return exactly one JSON object with status, findings, and summary. Do not edit specs.',
           contract, implementation: implementationReview, checks: JSON.stringify(checkReview), previous_findings: clip(findings, 800), initial_tester_response: clip(testReport, 1500), context: reviewContext,
-        }), repo);
+        }), repo));
         const recovered = safeStatusResponse(recovery);
         if (!shouldRecoverReview(recovered)) {
           testerResult = recovered;
@@ -283,7 +302,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
         testerResult = safeStatusResponse(testReport);
       }
     }
-    checks = await runChecks(repo, config);
+    checks = await timedStep(`Stage ${stage.id}: final checks (attempt ${attempt})`, () => runChecks(repo, config));
     const checkFailure = checks.filter((c) => c.code !== 0).map((c) => `${c.command.join(' ')} failed (${c.code})\n${c.output}`).join('\n');
     let validation: any;
     try {
@@ -291,11 +310,11 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
         task: 'Read-only validation. Compare the repository against the stage criteria and applicable specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail". Do not edit files.',
         contract, implementation: implementationReview, test_report: clip(testReport, 1500), check_failure: clip(checkFailure, 2000), context: reviewContext,
       });
-      validation = statusResponse(await invokeReadOnly(config.worker, validatorPrompt, repo));
+      validation = statusResponse(await timedStep(`Stage ${stage.id}: validation (attempt ${attempt})`, () => invokeReadOnly(config.worker, validatorPrompt, repo)));
       if (shouldRecoverReview(validation) && !sameAgent(config.worker, config.strong)) {
         console.error(`[strata] recovering inconclusive validator review with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
         try {
-          const recovered = statusResponse(await invokeReadOnly(config.strong, `${validatorPrompt}\n\nThe first validation response was malformed or inconclusive. Independently inspect the current worktree and evidence, then return a strict JSON decision with only concrete findings.`, repo));
+          const recovered = statusResponse(await timedStep(`Stage ${stage.id}: recover inconclusive validation`, () => invokeReadOnly(config.strong, `${validatorPrompt}\n\nThe first validation response was malformed or inconclusive. Independently inspect the current worktree and evidence, then return a strict JSON decision with only concrete findings.`, repo)));
           if (!shouldRecoverReview(recovered)) validation = recovered;
         } catch (error) {
           validation = { status: 'fail', findings: [
@@ -318,7 +337,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
   }
   if (!passed) throw new Error(`Stage ${stage.id} did not pass after ${attempts} implement/fix attempts. Findings are recorded in the run file.`);
 
-  const archive = await invoke(config.worker, promptFor('archivist', {
+  const archive = await timedStep(`Stage ${stage.id}: archive`, () => invoke(config.worker, promptFor('archivist', {
     task: `Record durable decisions, notes, and progress under ${config.workflow.memory_path}. Keep notes factual and concise.`,
     contract, stage_results: clip(JSON.stringify(stage.attempts!.map((item) => ({
       attempt: item.attempt,
@@ -327,10 +346,10 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       tester: item.tester && { status: item.tester.status, summary: item.tester.summary, findings: item.tester.findings },
       validation: item.validation && { status: item.validation.status, summary: item.validation.summary, findings: item.validation.findings },
     }))), 12000), context: clip(context, 6000),
-  }), repo);
+  }), repo));
   record.history.push({ type: 'archive', stage: stage.id, result: clip(archive, 4000) });
   stage.status = 'checkpoint_pending'; save();
-  await completeStage(repo, record, stage, save);
+  await timedStep(`Checkpoint stage ${stage.id}`, () => completeStage(repo, record, stage, save));
 }
 
 async function completeStage(repo: string, record: RecordData, stage: Stage, save: () => void) {
@@ -363,8 +382,11 @@ function errorMessage(error: unknown): string {
 async function runChecks(repo: string, config: StrataConfig): Promise<any[]> {
   const checks = config.workflow.checks.length ? config.workflow.checks : discoverChecks(repo);
   const results = [];
-  for (const command of checks) {
-    const result = await run(command[0], command.slice(1), repo, 15 * 60 * 1000);
+  for (let index = 0; index < checks.length; index += 1) {
+    const command = checks[index];
+    const label = `Check ${index + 1}/${checks.length}: ${command.join(' ')}`;
+    const result = await timedStep(label, () => run(command[0], command.slice(1), repo, 15 * 60 * 1000));
+    if (result.code !== 0) console.error(`[strata] ${label} failed (exit ${result.code ?? 'unknown'})`);
     results.push({ command, code: result.code, output: `${result.stdout}\n${result.stderr}`.slice(-5000) });
   }
   return results;

@@ -52,17 +52,13 @@ export async function invoke(agent: AgentConfig, prompt: string, cwd: string, re
         }
       }
       const summary = eventSummary(line, agent.provider);
-      if (summary && summary !== activity) {
-        activity = summary;
-        console.error(`[strata] ${role}: ${activity}`);
-      }
+      if (summary) activity = summary;
       if (providerFailure) return providerFailure;
     }
   };
-  console.error(`[strata] ${role} started (${agent.provider}${agent.model ? ` / ${agent.model}` : ''})`);
   const heartbeat = setInterval(() => {
-    console.error(`[strata] waiting for ${role} (${Math.floor((Date.now() - started) / 1000)}s; ${Math.floor((Date.now() - lastOutput) / 1000)}s since output; ${activity})`);
-  }, 30_000);
+    console.error(`[strata] ${role} still running (${Math.floor((Date.now() - started) / 1000)}s elapsed, ${Math.floor((Date.now() - lastOutput) / 1000)}s since output)`);
+  }, 60_000);
   let result;
   try {
     result = await run(agent.command, args, cwd, agent.timeout_seconds * 1000, env, { idleTimeoutMs: idleTimeout * 1000, onStdout });
@@ -85,7 +81,6 @@ export async function invoke(agent: AgentConfig, prompt: string, cwd: string, re
   if (result.code !== 0) throw new Error(`${agent.provider} exited ${result.code}: ${(result.stderr || result.stdout).slice(-3000)}`);
   const text = agent.provider === 'codex' ? codexText(result.stdout) : openCodeText(result.stdout);
   if (!text.trim()) throw new Error(`${agent.provider} returned no agent response`);
-  console.error(`[strata] ${role} completed in ${Math.floor((Date.now() - started) / 1000)}s`);
   return text;
 }
 
