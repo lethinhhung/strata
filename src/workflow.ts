@@ -157,7 +157,18 @@ async function planEpic(config: StrataConfig, repo: string, epic: string, contex
 
 async function runStage(repo: string, record: RecordData, stage: Stage, config: StrataConfig, context: string, save: () => void) {
   stage.status = 'in_progress'; save();
-  const contract = JSON.stringify({ stage, epic: record.epic }, null, 2);
+  // A persisted stage also contains every attempt, including tool transcripts in
+  // agent responses. Never put that history back into the prompt contract.
+  const contract = JSON.stringify({
+    stage: {
+      id: stage.id,
+      title: stage.title,
+      objective: stage.objective,
+      dependencies: stage.dependencies,
+      completion_criteria: stage.completion_criteria,
+    },
+    epic: record.epic,
+  }, null, 2);
   const stageContext = `${clip(relevantSourceContext(repo, stage), 8000)}\n\n${clip(context, 5000)}`;
   const lastAttempt = stage.attempts?.at(-1);
   let findings = lastAttempt && !lastAttempt.passed ? clip(attemptFindings(lastAttempt), 6000) : '';
@@ -248,19 +259,49 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
         }
       }
     }
+    let testerResult = safeStatusResponse(testReport);
+    if (shouldRecoverReview(testerResult) && !sameAgent(config.worker, config.strong)) {
+      console.error(`[strata] recovering inconclusive tester review with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
+      try {
+        const recovery = await invoke(config.strong, promptFor('tester', {
+          task: 'Independently review the supplied stage criteria, implementation summary, and completed automated checks. The first tester response was malformed or inconclusive. Do not assume warnings mean failure when every check exited successfully. Identify only concrete, evidence-backed mismatches; return exactly one JSON object with status, findings, and summary. Do not edit specs.',
+          contract, implementation: implementationReview, checks: JSON.stringify(checkReview), previous_findings: clip(findings, 5000), initial_tester_response: clip(testReport, 2500), context: reviewContext,
+        }), repo);
+        const recovered = safeStatusResponse(recovery);
+        if (!shouldRecoverReview(recovered)) {
+          testerResult = recovered;
+          testReport = JSON.stringify(recovered);
+        }
+      } catch (error) {
+        testReport = `${testReport}\nStrong-agent review recovery failed: ${errorMessage(error)}`;
+        testerResult = safeStatusResponse(testReport);
+      }
+    }
     checks = await runChecks(repo, config);
     const checkFailure = checks.filter((c) => c.code !== 0).map((c) => `${c.command.join(' ')} failed (${c.code})\n${c.output}`).join('\n');
     let validation: any;
     try {
-      validation = statusResponse(await invokeReadOnly(config.worker, promptFor('validator', {
+      const validatorPrompt = promptFor('validator', {
         task: 'Read-only validation. Compare the repository against the stage criteria and applicable specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail". Do not edit files.',
         contract, implementation: implementationReview, test_report: clip(testReport, 6000), check_failure: clip(checkFailure, 4000), context: reviewContext,
-      }), repo));
+      });
+      validation = statusResponse(await invokeReadOnly(config.worker, validatorPrompt, repo));
+      if (shouldRecoverReview(validation) && !sameAgent(config.worker, config.strong)) {
+        console.error(`[strata] recovering inconclusive validator review with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
+        try {
+          const recovered = statusResponse(await invokeReadOnly(config.strong, `${validatorPrompt}\n\nThe first validation response was malformed or inconclusive. Independently inspect the current worktree and evidence, then return a strict JSON decision with only concrete findings.`, repo));
+          if (!shouldRecoverReview(recovered)) validation = recovered;
+        } catch (error) {
+          validation = { status: 'fail', findings: [
+            ...(validation.findings ?? []),
+            `Strong-agent validator recovery failed: ${errorMessage(error)}`,
+          ], summary: 'Validation did not complete successfully.' };
+        }
+      }
     } catch (error) {
       const message = error instanceof ReadOnlyMutationError ? error.message : `Validator process failed: ${errorMessage(error)}`;
       validation = { status: 'fail', findings: [message], summary: 'Validation did not complete successfully.' };
     }
-    const testerResult = safeStatusResponse(testReport);
     const implementationSummary = implementations.map((item, index) => `Task ${index + 1}: ${item.slice(-1800)}`).join('\n');
     const currentFindings = [implementationSummary, ...implementationFailures, checkFailure, JSON.stringify(testerResult), JSON.stringify(validation)].filter(Boolean).join('\n');
     const thisPassed = implementationFailures.length === 0 && !checkFailure && testerResult?.status === 'pass' && validation.status === 'pass';
@@ -273,7 +314,13 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
 
   const archive = await invoke(config.worker, promptFor('archivist', {
     task: `Record durable decisions, notes, and progress under ${config.workflow.memory_path}. Keep notes factual and concise.`,
-    contract, stage_results: JSON.stringify(stage.attempts), context,
+    contract, stage_results: clip(JSON.stringify(stage.attempts!.map((item) => ({
+      attempt: item.attempt,
+      passed: item.passed,
+      checks: item.checks?.map((check: any) => ({ command: check.command, code: check.code })),
+      tester: item.tester && { status: item.tester.status, summary: item.tester.summary, findings: item.tester.findings },
+      validation: item.validation && { status: item.validation.status, summary: item.validation.summary, findings: item.validation.findings },
+    }))), 12000), context: clip(context, 6000),
   }), repo);
   record.history.push({ type: 'archive', stage: stage.id, result: clip(archive, 4000) });
   stage.status = 'complete';
@@ -587,4 +634,16 @@ function clip(value: string, maxLength: number): string {
 
 function safeStatusResponse(text: string): any {
   return statusResponse(text);
+}
+
+function shouldRecoverReview(result: any): boolean {
+  const summary = String(result?.summary ?? '');
+  const findings = Array.isArray(result?.findings) ? result.findings.join('\n') : '';
+  const evidence = `${summary}\n${findings}`;
+  return summary.includes('response format was invalid')
+    || (result?.status === 'fail' && /unable to determine|unable to assess|cannot determine|can't determine|further investigation required|not enough information|not wrapped in act|act warning/i.test(evidence));
+}
+
+function sameAgent(left: StrataConfig['worker'], right: StrataConfig['strong']): boolean {
+  return left.provider === right.provider && left.model === right.model && left.command === right.command;
 }
