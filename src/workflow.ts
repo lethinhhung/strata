@@ -232,17 +232,19 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       }
     }
     let checks = await runChecks(repo, config);
-    const implementationReview = implementations.map((item, index) => `Task ${index + 1}: ${clip(item, 1800)}`).join('\n\n');
+    // Agent output may contain long tool transcripts. Reviewers need a concise
+    // handoff, not those transcripts repeated alongside the source context.
+    const implementationReview = implementations.map((item, index) => `Task ${index + 1}: ${item.slice(-800)}`).join('\n\n');
     const checkReview = checks.map((check) => ({
       command: check.command.join(' '),
       passed: check.code === 0,
-      output: check.output ? clip(check.output, check.code === 0 ? 500 : 1800) : '',
+      ...(check.code !== 0 && check.output ? { output: clip(check.output, 1000) } : {}),
     }));
-    const reviewContext = clip(stageContext, 10000);
+    const reviewContext = clip(stageContext, 2000);
     let testReport: string;
     const testerPrompt = promptFor('tester', {
       task: 'Review the implementation and automated check results already provided. Do not rerun the configured full check suite; Strata runs it automatically before and after this review. Run only a narrowly focused check if needed to diagnose a specific failure, and fix failures introduced by this implementation. Do not edit specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":[...],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail".',
-      contract, implementation: implementationReview, checks: JSON.stringify(checkReview), previous_findings: clip(findings, 5000), context: reviewContext,
+      contract, implementation: implementationReview, checks: JSON.stringify(checkReview), previous_findings: clip(findings, 800), context: reviewContext,
     });
     try {
       testReport = clip(await invoke(config.worker, testerPrompt, repo), 6000);
@@ -265,7 +267,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       try {
         const recovery = await invoke(config.strong, promptFor('tester', {
           task: 'Independently review the supplied stage criteria, implementation summary, and completed automated checks. The first tester response was malformed or inconclusive. Do not assume warnings mean failure when every check exited successfully. Identify only concrete, evidence-backed mismatches; return exactly one JSON object with status, findings, and summary. Do not edit specs.',
-          contract, implementation: implementationReview, checks: JSON.stringify(checkReview), previous_findings: clip(findings, 5000), initial_tester_response: clip(testReport, 2500), context: reviewContext,
+          contract, implementation: implementationReview, checks: JSON.stringify(checkReview), previous_findings: clip(findings, 800), initial_tester_response: clip(testReport, 1500), context: reviewContext,
         }), repo);
         const recovered = safeStatusResponse(recovery);
         if (!shouldRecoverReview(recovered)) {
@@ -283,7 +285,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     try {
       const validatorPrompt = promptFor('validator', {
         task: 'Read-only validation. Compare the repository against the stage criteria and applicable specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail". Do not edit files.',
-        contract, implementation: implementationReview, test_report: clip(testReport, 6000), check_failure: clip(checkFailure, 4000), context: reviewContext,
+        contract, implementation: implementationReview, test_report: clip(testReport, 1500), check_failure: clip(checkFailure, 2000), context: reviewContext,
       });
       validation = statusResponse(await invokeReadOnly(config.worker, validatorPrompt, repo));
       if (shouldRecoverReview(validation) && !sameAgent(config.worker, config.strong)) {
