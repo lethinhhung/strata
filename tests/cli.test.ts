@@ -98,7 +98,9 @@ describe('epic input and controlled workflow outcomes', () => {
       `Run ${record.id} complete: 1 stage(s)`,
       `Run record: ${path.join(repo, 'docs', 'temps', `${record.id}.json`)}`,
     ]);
-    expect(errors).toEqual([]);
+    expect(errors).toContain('[strata] Plan repository exploration...');
+    expect(errors).toContain('[strata] Plan repository exploration completed in 0s');
+    expect(errors).toContain('[strata] Checkpoint stage first completed in 0s');
   });
   it.each(['missing file', 'empty text', 'empty file', 'extra positional'])('rejects %s before workflow execution', async (input) => {
     const { repo } = repository();

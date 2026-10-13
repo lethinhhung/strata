@@ -90,9 +90,9 @@ describe('provider invocation', () => {
     vi.useFakeTimers();
     const process = child();
     spawnMock.mockReturnValue(process);
-    const result = expect(invoke({ ...agent(), timeout_seconds: 35 }, 'prompt', '/fixture')).rejects.toThrow('timed out after 35s');
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('waiting for'));
+    const result = expect(invoke({ ...agent(), timeout_seconds: 65 }, 'prompt', '/fixture')).rejects.toThrow('timed out after 65s');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('still running'));
     await vi.advanceTimersByTimeAsync(5000);
     expect(process.kill).toHaveBeenCalledWith('SIGTERM');
     await vi.advanceTimersByTimeAsync(2000);
