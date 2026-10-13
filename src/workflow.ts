@@ -423,7 +423,7 @@ function fingerprintWorkspace(files: Map<string, WorkspaceFile>, index?: Buffer)
 }
 
 async function restoreWorkspace(repo: string, before: WorkspaceSnapshot, after: WorkspaceSnapshot): Promise<void> {
-  for (const [relative, state] of after.files) {
+  for (const relative of after.files.keys()) {
     if (before.files.has(relative)) continue;
     const full = path.join(repo, relative);
     try { fs.unlinkSync(full); } catch { /* already removed */ }

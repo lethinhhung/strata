@@ -18,6 +18,26 @@ npm link
 
 Strata reads `.strata.toml` from the target repository when present. If it is absent, built-in defaults use Codex for coordinators and OpenCode with GPT OSS 20B for workers. Create or replace the file with `strata init --repo DIR` or `strata init --repo DIR --force`.
 
+## Local quality checks
+
+From the repository root, install the locked dependencies and run the checks before building:
+
+```sh
+npm ci
+npm run lint
+npm run typecheck
+npm run build
+```
+
+Lint checks `src/**/*.ts` and `.eslintrc.cjs`, excluding `node_modules/` and `dist/`. It uses the ESLint and TypeScript ESLint recommended correctness rules while allowing existing explicit `any` types at configuration and provider data boundaries. Lint does not autofix or write a cache, and the strict typecheck does not emit files. The build produces the executable `dist/src/cli.js` entry point.
+
+Smoke-test the built CLI without starting provider sessions:
+
+```sh
+./dist/src/cli.js --help
+./dist/src/cli.js --version
+```
+
 ## Run
 
 Pass epic text directly:
