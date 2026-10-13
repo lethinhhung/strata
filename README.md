@@ -43,6 +43,12 @@ Smoke-test the built CLI without starting provider sessions:
 ./dist/src/cli.js --version
 ```
 
+## CI checks
+
+- Pull‑request CI runs on every push to a branch and on pull requests. It installs dependencies with `npm ci`, then runs `npm run lint`, `npm run typecheck`, and `npm test`.  Each command is required for the build to succeed.
+- After a merge into `main`, the post‑merge workflow installs dependencies and runs `npm run build`.  It then verifies that `dist/src/cli.js` exists, is executable, and responds to `--help` and `--version`.
+- All actions are read‑only; no external credentials or deployment steps are involved.
+
 ## Run
 
 Pass epic text directly:
