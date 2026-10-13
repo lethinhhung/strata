@@ -6,7 +6,8 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  build:
+  quality:
+    name: Quality checks
     runs-on: ubuntu-latest
     permissions:
       contents: read
