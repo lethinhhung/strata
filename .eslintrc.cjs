@@ -10,7 +10,7 @@ module.exports = {
   ignorePatterns: ['dist/', 'node_modules/'],
   extends: ['eslint:recommended'],
   overrides: [{
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'tests/**/*.ts', 'vitest.config.ts'],
     parser: '@typescript-eslint/parser',
     parserOptions: { sourceType: 'module' },
     plugins: ['@typescript-eslint'],

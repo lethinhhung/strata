@@ -131,9 +131,13 @@ export async function resumeRun(repo: string, reference: string, config: StrataC
     }
     for (const stage of record.stages) {
       if (stage.status === 'complete') continue;
-      stage.status = 'pending';
       const incomplete = stage.dependencies.filter((dep) => !record.stages.some((item) => item.id === dep && item.status === 'complete'));
       if (incomplete.length) throw new Error(`Stage ${stage.id} has incomplete dependencies: ${incomplete.join(', ')}`);
+      if (stage.status === 'checkpoint_pending') {
+        await completeStage(repo, record, stage, save);
+        continue;
+      }
+      stage.status = 'pending';
       await runStage(repo, record, stage, config, context, save);
     }
     record.status = 'complete'; record.history.push({ type: 'complete', at: new Date().toISOString() }); save();
@@ -325,9 +329,14 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     }))), 12000), context: clip(context, 6000),
   }), repo);
   record.history.push({ type: 'archive', stage: stage.id, result: clip(archive, 4000) });
+  stage.status = 'checkpoint_pending'; save();
+  await completeStage(repo, record, stage, save);
+}
+
+async function completeStage(repo: string, record: RecordData, stage: Stage, save: () => void) {
+  await checkpoint(repo, stage);
   stage.status = 'complete';
   record.history.push({ type: 'stage_complete', stage: stage.id, at: new Date().toISOString() }); save();
-  await checkpoint(repo, stage);
 }
 
 function attemptFindings(attempt: any): string {
@@ -452,7 +461,7 @@ function discoverChecks(repo: string): string[][] {
   const packageFile = path.join(repo, 'package.json');
   if (!fs.existsSync(packageFile)) return [];
   let scripts: Record<string, string>;
-  try { scripts = JSON.parse(fs.readFileSync(packageFile, 'utf8')).scripts ?? {}; } catch { return []; }
+  try { scripts = JSON.parse(fs.readFileSync(packageFile, 'utf8'))?.scripts ?? {}; } catch { return []; }
   const manager = fs.existsSync(path.join(repo, 'pnpm-lock.yaml')) ? 'pnpm' : fs.existsSync(path.join(repo, 'yarn.lock')) ? 'yarn' : fs.existsSync(path.join(repo, 'bun.lock')) ? 'bun' : 'npm';
   const checks: string[][] = [];
   const names = [scripts['test:ci'] ? 'test:ci' : scripts.test ? 'test' : '', 'lint', 'typecheck', 'build'].filter((name) => name && scripts[name]);
@@ -464,11 +473,13 @@ function discoverChecks(repo: string): string[][] {
 
 async function checkpoint(repo: string, stage: Stage) {
   const status = await run('git', ['status', '--porcelain'], repo, 10000);
-  if (!status.stdout.trim()) return;
-  await run('git', ['add', '-A'], repo, 10000);
-  const message = `strata: ${stage.title}`;
-  const commit = await run('git', ['commit', '-m', message], repo, 60000);
-  if (commit.code !== 0) throw new Error(`Stage checkpoint commit failed: ${commit.stderr}`);
+  if (status.stdout.trim()) {
+    const added = await run('git', ['add', '-A'], repo, 10000);
+    if (added.code !== 0) throw new Error(`Stage checkpoint add failed: ${added.stderr}`);
+    const message = `strata: ${stage.title}`;
+    const commit = await run('git', ['commit', '-m', message], repo, 60000);
+    if (commit.code !== 0) throw new Error(`Stage checkpoint commit failed: ${commit.stderr}`);
+  }
   const push = await pushCurrentBranch(repo);
   if (push.code !== 0) throw new Error(`Stage ${stage.id} committed but push failed: ${push.stderr}`);
 }

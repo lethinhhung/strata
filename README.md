@@ -24,12 +24,17 @@ From the repository root, install the locked dependencies and run the checks bef
 
 ```sh
 npm ci
+npm test
 npm run lint
 npm run typecheck
 npm run build
 ```
 
-Lint checks `src/**/*.ts` and `.eslintrc.cjs`, excluding `node_modules/` and `dist/`. It uses the ESLint and TypeScript ESLint recommended correctness rules while allowing existing explicit `any` types at configuration and provider data boundaries. Lint does not autofix or write a cache, and the strict typecheck does not emit files. The build produces the executable `dist/src/cli.js` entry point.
+`npm test` runs the Vitest regression suite once and exits, returning nonzero on assertion failures or when no tests are found. The test tooling requires Node.js 20.19+ or 22.12+. Tests cover configuration, provider responses and subprocess handling, CLI behavior, and workflow failure and resume handling.
+
+Provider sessions are replaced with scripted substitutes. Filesystem and Git cases use disposable repositories, isolated Git identity/configuration, disabled signing and hooks, and local bare remotes. Fixture checks are harmless local commands; no provider installation, credentials, network, or recursive invocation of this repository's suite is required. Fixtures and awaited local children are cleaned up after tests, including failures.
+
+Lint checks `src/`, `tests/`, `vitest.config.ts`, and `.eslintrc.cjs`, excluding `node_modules/` and `dist/`. It uses the ESLint and TypeScript ESLint recommended correctness rules while allowing existing explicit `any` types at configuration and provider data boundaries. Lint does not autofix or write a cache, and the strict typecheck covers source, tests, and test configuration without emitting files. The production build includes only source and produces the executable `dist/src/cli.js` entry point; tests and fixtures stay out of `dist/`.
 
 Smoke-test the built CLI without starting provider sessions:
 
