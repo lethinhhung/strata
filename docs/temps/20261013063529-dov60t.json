@@ -1,8 +1,8 @@
 {
   "id": "20261013063529-dov60t",
-  "status": "running",
+  "status": "complete",
   "created_at": "2026-10-13T06:35:29.576Z",
-  "updated_at": "2026-10-13T12:27:32.618Z",
+  "updated_at": "2026-10-13T12:27:35.972Z",
   "repo": "/Users/macos/Projects/strata-2",
   "epic": "Implement lint, typecheck, and tests, both local and CI (PR). And build post merge.",
   "epic_file": "(inline epic)",
@@ -347,6 +347,10 @@
       "type": "stage_complete",
       "stage": "pull-request-and-merge-ci",
       "at": "2026-10-13T12:27:32.618Z"
+    },
+    {
+      "type": "complete",
+      "at": "2026-10-13T12:27:35.972Z"
     }
   ]
 }
