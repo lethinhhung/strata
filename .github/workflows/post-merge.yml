@@ -1,0 +1,32 @@
+name: Post‑merge Build
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify CLI
+        run: |
+          if [ ! -f dist/src/cli.js ]; then echo 'cli.js missing' >&2; exit 1; fi
+          if [ ! -x dist/src/cli.js ]; then echo 'cli.js not executable' >&2; exit 1; fi
+          ./dist/src/cli.js --help >/dev/null
+          ./dist/src/cli.js --version >/dev/null

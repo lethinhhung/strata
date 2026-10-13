@@ -71,6 +71,7 @@ async function main(argv: string[]): Promise<number> {
   let epic: string;
   let epicFile: string;
   if (typeof options.epic === 'string') {
+    if (positional.length !== 1) throw new Error('run accepts either one quoted epic description or --epic FILE');
     epicFile = path.resolve(String(options.epic));
     if (!fs.existsSync(epicFile) || !fs.statSync(epicFile).isFile()) throw new Error(`Epic file not found: ${epicFile}`);
     epic = fs.readFileSync(epicFile, 'utf8');
@@ -97,10 +98,16 @@ async function main(argv: string[]): Promise<number> {
 
 const entry = process.argv[1] ? fs.realpathSync(process.argv[1]) : '';
 if (entry === fileURLToPath(import.meta.url)) {
-  main(process.argv.slice(2)).then((code) => { process.exitCode = code; }).catch((error) => {
+  runCli(process.argv.slice(2)).then((code) => { process.exitCode = code; });
+}
+
+export async function runCli(argv: string[]): Promise<number> {
+  try {
+    return await main(argv);
+  } catch (error) {
     console.error(`strata: ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = 1;
-  });
+    return 1;
+  }
 }
 
 export { DEFAULT_CONFIG };
