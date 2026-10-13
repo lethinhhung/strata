@@ -47,7 +47,7 @@ export async function startRun(repo: string, epic: string, epicFile: string, con
       : [{ question: 'Inspect the repository specifications, conventions, and implementation areas relevant to this epic.' }];
     const initialFindings: string[] = [];
     for (const item of explorationTasks) {
-      initialFindings.push(clip(await invokeReadOnly(config.worker, promptFor('explore_agent', {
+      initialFindings.push(clip(await exploreWithRecovery(config, promptFor('explore_agent', {
         task: String(item.question ?? item.task ?? 'Inspect the repository areas relevant to this epic and report findings.'), epic, context,
       }), repo), 6000));
     }
@@ -108,7 +108,7 @@ export async function resumeRun(repo: string, reference: string, config: StrataC
         : [{ question: 'Inspect repository specifications, conventions, and implementation areas relevant to this epic.' }];
       const findings: string[] = [];
       for (const item of explorationTasks) {
-        findings.push(clip(await invokeReadOnly(config.worker, promptFor('explore_agent', {
+        findings.push(clip(await exploreWithRecovery(config, promptFor('explore_agent', {
           task: String(item.question ?? item.task ?? 'Inspect the repository areas relevant to this epic.'), epic: record.epic, context,
         }), repo), 6000));
       }
@@ -172,7 +172,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
   const stageContext = `${clip(relevantSourceContext(repo, stage), 8000)}\n\n${clip(context, 5000)}`;
   const lastAttempt = stage.attempts?.at(-1);
   let findings = lastAttempt && !lastAttempt.passed ? clip(attemptFindings(lastAttempt), 6000) : '';
-  const explore = clip(await invokeReadOnly(config.worker, promptFor('explore_agent', {
+  const explore = clip(await exploreWithRecovery(config, promptFor('explore_agent', {
     task: 'Investigate relevant code, tests, conventions, dependencies, and project instructions for this stage. Read the stage-specific source excerpts and verify them against the repository. Read only; return JSON {"summary":"...","findings":[...],"files":[...],"uncertainties":[]}.', contract, context: stageContext,
   }), repo), 7000);
   const taskPlan = jsonResponse(await invokeReadOnly(config.strong, promptFor('stage_coordinator', {
@@ -361,14 +361,37 @@ async function runChecks(repo: string, config: StrataConfig): Promise<any[]> {
   return results;
 }
 
+async function exploreWithRecovery(config: StrataConfig, prompt: string, repo: string): Promise<string> {
+  try {
+    return await invokeReadOnly(config.worker, prompt, repo);
+  } catch (error) {
+    if (error instanceof ReadOnlyMutationError || sameAgent(config.worker, config.strong)) throw error;
+    console.error(`[strata] recovering failed explore agent with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}: ${errorMessage(error)}`);
+    try {
+      return await invokeReadOnly(config.strong, `${prompt}\n\n## Recovery handoff\nThe configured explorer failed: ${errorMessage(error)}\nInspect the repository read-only and complete the original exploration question.`, repo);
+    } catch (recoveryError) {
+      throw new Error(`Explore agent failed: ${errorMessage(error)}\nStrong-agent exploration recovery failed: ${errorMessage(recoveryError)}`);
+    }
+  }
+}
+
 async function invokeReadOnly(agent: StrataConfig['worker'] | StrataConfig['strong'], prompt: string, repo: string): Promise<string> {
   const before = await snapshotWorkspace(repo);
-  const response = await invoke(agent, prompt, repo, true);
+  let response = '';
+  let failure: unknown;
+  let rejected = false;
+  try {
+    response = await invoke(agent, prompt, repo, true);
+  } catch (error) {
+    rejected = true;
+    failure = error;
+  }
   const after = await snapshotWorkspace(repo);
   if (before.fingerprint !== after.fingerprint) {
     await restoreWorkspace(repo, before, after);
     throw new ReadOnlyMutationError('A read-only workflow agent changed the target worktree; its changes were reverted.');
   }
+  if (rejected) throw failure;
   return response;
 }
 

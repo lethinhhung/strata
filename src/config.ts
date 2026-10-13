@@ -7,6 +7,7 @@ export interface AgentConfig {
   model: string;
   command: string;
   timeout_seconds: number;
+  idle_timeout_seconds?: number;
   extra_args: string[];
 }
 
@@ -35,6 +36,7 @@ provider = "opencode"
 model = "nvidia/openai/gpt-oss-20b"
 command = "opencode"
 timeout_seconds = 1800
+idle_timeout_seconds = 360
 
 [workflow]
 implement_fix_attempts = 3
@@ -57,11 +59,16 @@ export function loadConfig(repo: string, explicit?: string): StrataConfig {
     const input = raw.models?.[name] ?? {};
     const provider = input.provider ?? fallback.provider;
     if (provider !== 'codex' && provider !== 'opencode') throw new Error(`Unsupported provider for models.${name}: ${provider}`);
+    const timeout = Number(input.timeout_seconds ?? fallback.timeout_seconds);
+    const idleTimeout = Number(input.idle_timeout_seconds ?? (provider === 'opencode' ? 360 : 0));
+    if (!Number.isFinite(timeout) || timeout <= 0) throw new Error(`models.${name}.timeout_seconds must be a positive number`);
+    if (!Number.isFinite(idleTimeout) || idleTimeout < 0) throw new Error(`models.${name}.idle_timeout_seconds must be a non-negative number`);
     return {
       provider,
       model: String(input.model ?? ''),
       command: String(input.command ?? provider),
-      timeout_seconds: Number(input.timeout_seconds ?? fallback.timeout_seconds),
+      timeout_seconds: timeout,
+      idle_timeout_seconds: idleTimeout,
       extra_args: Array.isArray(input.extra_args) ? input.extra_args.map(String) : [],
     };
   };
