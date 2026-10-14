@@ -66,14 +66,22 @@ export async function invoke(agent: AgentConfig, prompt: string, cwd: string, re
       if (providerFailure) return providerFailure;
     }
   };
-  const heartbeat = setInterval(() => {
-    console.error(`[strata] ${role} still running (${Math.floor((Date.now() - started) / 1000)}s elapsed, ${Math.floor((Date.now() - lastOutput) / 1000)}s since output)`);
-  }, 60_000);
+  // Keep the elapsed timer visible in an interactive terminal without adding
+  // a new log record on every refresh. Non-interactive logs stay quiet.
+  const showTimer = Boolean(process.stderr.isTTY);
+  const heartbeat = showTimer ? setInterval(() => {
+    const elapsed = Math.floor((Date.now() - started) / 1000);
+    const sinceOutput = Math.floor((Date.now() - lastOutput) / 1000);
+    process.stderr.write(`\r[strata] ${role} running (${elapsed}s elapsed, ${sinceOutput}s since output)\x1b[K`);
+  }, 1000) : undefined;
   let result;
   try {
     result = await run(agent.command, args, cwd, agent.timeout_seconds * 1000, env, { idleTimeoutMs: idleTimeout * 1000, onStdout });
   } finally {
-    clearInterval(heartbeat);
+    if (heartbeat) {
+      clearInterval(heartbeat);
+      process.stderr.write('\r\x1b[K');
+    }
   }
   // The provider can exit nonzero after emitting its actual error as JSON on
   // stdout. Prefer that error to a tail of unrelated tool-event transcripts.

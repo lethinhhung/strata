@@ -92,7 +92,7 @@ describe('provider invocation', () => {
     spawnMock.mockReturnValue(process);
     const result = expect(invoke({ ...agent(), timeout_seconds: 65 }, 'prompt', '/fixture')).rejects.toThrow('timed out after 65s');
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('still running'));
+    expect(console.error).not.toHaveBeenCalledWith(expect.stringContaining('still running'));
     await vi.advanceTimersByTimeAsync(5000);
     expect(process.kill).toHaveBeenCalledWith('SIGTERM');
     await vi.advanceTimersByTimeAsync(2000);
