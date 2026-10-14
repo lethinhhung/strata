@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { StrataConfig } from './config.js';
-import { invoke, jsonResponse, run, setCurrentStep } from './provider.js';
+import { invoke, jsonResponse, run } from './provider.js';
 
 type Stage = { id: string; title: string; objective: string; dependencies: string[]; completion_criteria: string[]; status?: string; attempts?: any[] };
 type RecordData = { id: string; status: string; created_at: string; updated_at: string; repo: string; epic: string; epic_file: string; branch: string; stages: Stage[]; blockers?: string[]; history: any[]; error?: string };
@@ -15,7 +15,6 @@ class ReadOnlyMutationError extends Error {}
 
 async function timedStep<T>(label: string, action: () => Promise<T>): Promise<T> {
   const started = Date.now();
-  setCurrentStep(label);
   console.error(`[strata] ${label}...`);
   try {
     const result = await action();
