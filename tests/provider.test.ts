@@ -55,6 +55,11 @@ describe('provider invocation', () => {
       expect(JSON.parse(options.env.OPENCODE_PERMISSION)).toEqual({ '*': 'deny', read: 'allow', glob: 'allow', grep: 'allow', list: 'allow', lsp: 'allow' });
     } else expect(options.env).toBe(process.env);
   });
+  it('does not print token usage for individual provider events', async () => {
+    response('{"type":"step_finish","usage":{"input_tokens":20240,"output_tokens":44,"cached_input_tokens":0}}\n{"type":"text","text":"answer","usage":{"input_tokens":21140,"output_tokens":48,"cached_input_tokens":0}}');
+    await invoke(agent('opencode'), 'prompt', '/fixture');
+    expect(console.error).not.toHaveBeenCalledWith(expect.stringContaining('token usage'));
+  });
   it.each(['codex', 'opencode'] as const)('retains raw response fallback for %s', async (provider) => {
     response('raw answer');
     expect(await invoke(agent(provider), 'prompt', '/fixture')).toBe('raw answer');

@@ -1,14 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { AgentConfig } from './config.js';
 
-let currentStep = 'model request';
-let stepStarted = Date.now();
-
-export function setCurrentStep(label: string): void {
-  currentStep = label;
-  stepStarted = Date.now();
-}
-
 export async function invoke(agent: AgentConfig, prompt: string, cwd: string, readOnly = false): Promise<string> {
   const effectivePrompt = agent.provider === 'opencode' ? fitPrompt(prompt, 18000) : prompt;
   const args = agent.provider === 'codex'
@@ -47,7 +39,6 @@ export async function invoke(agent: AgentConfig, prompt: string, cwd: string, re
     for (const line of lines) {
       if (agent.provider === 'opencode') {
         const event = parseEvent(line);
-        logUsage(event);
         if (event?.type === 'error') providerFailure = providerError(event.error);
         if (event?.type === 'tool_use' && /Model tried to call unavailable tool\b/i.test(String(event.part?.state?.error ?? ''))) {
           const call = event.part.callID ?? event.part.id;
@@ -60,7 +51,6 @@ export async function invoke(agent: AgentConfig, prompt: string, cwd: string, re
           }
         }
       }
-      else logUsage(parseEvent(line));
       const summary = eventSummary(line, agent.provider);
       if (summary) activity = summary;
       if (providerFailure) return providerFailure;
@@ -100,20 +90,6 @@ export async function invoke(agent: AgentConfig, prompt: string, cwd: string, re
   const text = agent.provider === 'codex' ? codexText(result.stdout) : openCodeText(result.stdout);
   if (!text.trim()) throw new Error(`${agent.provider} returned no agent response`);
   return text;
-}
-
-function logUsage(event: any): void {
-  if (!event) return;
-  const usage = event.usage ?? event.part?.usage ?? event.part?.tokens;
-  if (!usage || typeof usage !== 'object') return;
-  const input = usage.input_tokens ?? usage.input ?? usage.prompt_tokens;
-  const output = usage.output_tokens ?? usage.output ?? usage.completion_tokens;
-  const cached = usage.cached_input_tokens ?? usage.cache_read_input_tokens ?? usage.cache?.read;
-  if (![input, output, cached].some((value) => Number.isFinite(Number(value)))) return;
-  const elapsed = Math.floor((Date.now() - stepStarted) / 1000);
-  const details = [`input ${input ?? '?'}`, `output ${output ?? '?'}`];
-  if (cached !== undefined) details.push(`cached ${cached}`);
-  console.error(`[strata] ${currentStep} (${elapsed}s elapsed): token usage ${details.join(', ')}`);
 }
 
 function fitPrompt(prompt: string, maxLength: number): string {
