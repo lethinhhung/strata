@@ -73,7 +73,16 @@ export function loadConfig(repo: string, explicit?: string): StrataConfig {
     };
   };
   const defaults = raw.workflow ?? {};
-  const attempts = Number(defaults.implement_fix_attempts ?? 3);
+  const configuredAttempts = defaults.implement_fix_attempts;
+  const configuredRepairs = defaults.max_repairs;
+  if (configuredAttempts !== undefined && configuredRepairs !== undefined) {
+    throw new Error('Set only one of workflow.implement_fix_attempts or workflow.max_repairs');
+  }
+  const repairs = Number(configuredRepairs ?? 2);
+  if (configuredRepairs !== undefined && (!Number.isInteger(repairs) || repairs < 0)) {
+    throw new Error('workflow.max_repairs must be a non-negative integer');
+  }
+  const attempts = Number(configuredAttempts ?? (configuredRepairs === undefined ? 3 : repairs + 1));
   if (!Number.isInteger(attempts) || attempts < 1) throw new Error('workflow.implement_fix_attempts must be a positive integer');
   const checks = defaults.checks ?? [];
   if (!Array.isArray(checks) || checks.some((c: unknown) => !Array.isArray(c) || c.length === 0 || c.some((v) => typeof v !== 'string'))) {

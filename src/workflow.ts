@@ -199,7 +199,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     task: 'Investigate relevant code, tests, conventions, dependencies, and project instructions for this stage. Read the stage-specific source excerpts and verify them against the repository. Read only; return JSON {"summary":"...","findings":[...],"files":[...],"uncertainties":[]}.', contract, context: stageContext,
   }), repo)), 7000);
   const taskPlan = jsonResponse(await timedStep(`Stage ${stage.id}: plan tasks`, () => invokeReadOnly(config.strong, promptFor('stage_coordinator', {
-    task: 'Turn this stage into ordered, focused implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}],"validation_requirements":[...]}. Include focused regression and quality work in the appropriate handoff; preserve the stage acceptance criteria. Assume the configured Implementer has less planning and execution capacity than you. Prefer one or two tasks, each feasible in one implementation handoff, with one coherent responsibility, explicit file boundaries, and a concrete completion check; use at most three. Do not bundle a large refactor with unrelated modules, broad test restructuring, or repository-wide validation. For multi-module refactors, make each task a responsibility-sized migration that leaves a coherent state. If this stage cannot fit within three bounded tasks, identify the stage as oversized and recommend dependent stage boundaries instead of assigning one broad task. When prior attempt findings are present, make the plan directly address them and do not repeat rejected approaches.',
+    task: 'Turn this stage into ordered, small implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"id":"stable-id","task":"...","files":["path/to/file"],"depends_on":[],"validation_criteria":["..."]}],"validation_requirements":[...]}. Keep each task feasible in one handoff and focused on one function or one cohesive responsibility. For large refactors, assign one function per task and give each task a distinct destination file; defer shared exports and integration to a final task. Mark exact files each task may edit. Independent tasks with non-overlapping files and no dependencies will run in parallel, so do not mark tasks independent when they share files or depend on another task. Include a concrete focused check and validation criteria for each task. Do not bundle unrelated modules or repository-wide validation. If the stage is too broad to split safely into small tasks, recommend dependent stages. When prior findings are present, address them directly and do not repeat rejected approaches.',
     contract, explore, prior_attempt_findings: findings, context: stageContext,
   }), repo)));
   let tasks: any[] = Array.isArray(taskPlan.implementation_tasks) && taskPlan.implementation_tasks.length ? taskPlan.implementation_tasks : [{ task: stage.objective }];
@@ -209,7 +209,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     if (attempt > 1 && findings) {
       try {
         const repairPlan = jsonResponse(await timedStep(`Stage ${stage.id}: plan repairs`, () => invokeReadOnly(config.strong, promptFor('stage_coordinator', {
-          task: 'Review the prior implementation, tester, and validator findings. Clarify and route the required repairs as ordered implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"task":"..."}]}. Keep the original stage contract authoritative. Assume the configured Implementer has less planning and execution capacity than you. Prefer one or two bounded tasks, use at most three, and explicitly address each blocking finding with one coherent change and a concrete check. Do not respond to an oversized or incomplete refactor with another broad handoff; narrow the repair to a responsibility-sized change or recommend that the stage be divided.',
+          task: 'Review the prior implementation, tester, and validator findings. Clarify and route required repairs as ordered, small tasks. Do not implement. Return JSON {"implementation_tasks":[{"id":"stable-id","task":"...","files":["path/to/file"],"depends_on":[],"validation_criteria":["..."]}]}. Keep the original stage contract authoritative. Focus each task on one function or one cohesive responsibility, name exact files, and include a concrete focused check and validation criteria. Independent tasks with non-overlapping files and no dependencies may run in parallel. Do not repeat a failed broad handoff; if the repair is too broad, recommend dependent stage boundaries.',
           contract, findings, previous_implementation_tasks: JSON.stringify(tasks), context: stageContext,
         }), repo)));
         if (Array.isArray(repairPlan.implementation_tasks) && repairPlan.implementation_tasks.length) tasks = repairPlan.implementation_tasks;
@@ -217,43 +217,15 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
         findings += `\nStage Coordinator repair planning failed; retrying the previous implementation tasks. ${errorMessage(error)}`;
       }
     }
-    const implementations: string[] = [];
+    const implementations: string[] = Array(tasks.length);
     const implementationFailures: string[] = [];
-    for (let i = 0; i < tasks.length; i += 1) {
-      const values = {
-        task: `Implement task ${i + 1} of ${tasks.length}. Inspect and build on the current worktree and the supplied exploration findings. Use the repository file index in project context to locate existing routes and components; verify exact paths before claiming something is missing, and extend existing code instead of creating a duplicate. Complete the assigned task even when it spans multiple files. Do not stop at a plan, apology, or claim that the work is too large: make the scoped code changes. Follow project rules and specs, and do not create reports or edit specifications. Specification changes belong to the Epic Coordinator and require explicit authorization in the epic. Return a concise summary of actual changes.`,
-        contract, implementation_task: tasks[i].task, task_plan: JSON.stringify(tasks), stage_exploration: explore,
-        prior_task_results: clip(implementations.join('\n\n'), 2500), previous_findings: clip(findings, 4000), context: clip(stageContext, 6000),
-      };
-      const implementationPrompt = promptFor('implementer', values);
-      try {
-        const response = await timedStep(`Stage ${stage.id}: implement task ${i + 1}/${tasks.length}`, () => invoke(config.worker, implementationPrompt, repo));
-        if (config.worker.provider !== config.strong.provider || config.worker.model !== config.strong.model) {
-          const refusal = implementationRefusal(response);
-          if (refusal) throw new Error(`Worker returned a refusal instead of implementing: ${refusal}`);
-        }
-        implementations.push(clip(response, 4000));
-      } catch (error) {
-        const primaryFailure = `Implementer task ${i + 1} failed on ${config.worker.provider}: ${errorMessage(error)}`;
-        if (config.worker.provider === config.strong.provider && config.worker.model === config.strong.model) {
-          implementationFailures.push(primaryFailure);
-          implementations.push(primaryFailure);
-          continue;
-        }
-        console.error(`[strata] recovering failed implementer task ${i + 1} with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
-        try {
-          const recoveryPrompt = `${implementationPrompt}\n\n## Recovery handoff\nThe configured worker process failed before completing this task: ${errorMessage(error)}\nTake over implementation now. Inspect the current worktree, make the requested code changes, and return a concise summary of actual changes.`;
-          const response = await timedStep(`Stage ${stage.id}: recover task ${i + 1}`, () => invoke(config.strong, recoveryPrompt, repo));
-          const refusal = implementationRefusal(response);
-          if (refusal) throw new Error(`Strong agent returned a refusal instead of implementing: ${refusal}`);
-          implementations.push(clip(response, 4000));
-        } catch (recoveryError) {
-          const failure = `${primaryFailure}\nStrong-agent recovery also failed: ${errorMessage(recoveryError)}`;
-          implementationFailures.push(failure);
-          implementations.push(failure);
-        }
-      }
+    const outcomes: Array<{ response: string; failure?: string }> = Array(tasks.length);
+    for (const batch of taskBatches(tasks)) {
+      const prior = outcomes.filter(Boolean).map((result) => result.response);
+      const results = await Promise.all(batch.map((index) => implementTask(tasks[index], index, tasks, prior, findings, stageContext, explore, contract, config, repo, stage.id)));
+      batch.forEach((index, offset) => { outcomes[index] = results[offset]; implementations[index] = results[offset].response; });
     }
+    implementationFailures.push(...outcomes.flatMap((result) => result.failure ? [result.failure] : []));
     let checks = await timedStep(`Stage ${stage.id}: checks (attempt ${attempt})`, () => runChecks(repo, config));
     // Agent output may contain long tool transcripts. Reviewers need a concise
     // handoff, not those transcripts repeated alongside the source context.
@@ -267,7 +239,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     let testReport: string;
     const testerPrompt = promptFor('tester', {
       task: 'Review the implementation and automated check results already provided. Do not rerun the configured full check suite; Strata runs it automatically before and after this review. Run only a narrowly focused check if needed to diagnose a specific failure, and fix failures introduced by this implementation. Do not edit specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":[...],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail".',
-      contract, implementation: implementationReview, checks: JSON.stringify(checkReview), previous_findings: clip(findings, 800), context: reviewContext,
+        contract, task_plan: JSON.stringify(tasks), implementation: implementationReview, checks: JSON.stringify(checkReview), previous_findings: clip(findings, 800), context: reviewContext,
     });
     try {
       testReport = clip(await timedStep(`Stage ${stage.id}: tester review (attempt ${attempt})`, () => invoke(config.worker, testerPrompt, repo)), 6000);
@@ -306,27 +278,29 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     const checkFailure = checks.filter((c) => c.code !== 0).map((c) => `${c.command.join(' ')} failed (${c.code})\n${c.output}`).join('\n');
     let validation: any;
     try {
-      const validatorPrompt = promptFor('validator', {
-        task: 'Read-only validation. Compare the current worktree against each stage criterion and applicable spec. Re-read the current files before reporting a code or import finding; do not repeat findings from earlier attempts without verifying them now. Treat latest_checks as the authoritative result of the final automated check run: a passed check contradicts claims that the same check currently fails, though it does not prove unrelated behavioral criteria. Every finding must name the exact requirement and cite current evidence such as a file and line or a failing check and assertion. Do not report speculative or stale findings. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail" and explain the uncertainty. Do not edit files.',
-        contract, implementation: implementationReview, test_report: clip(testReport, 1500), latest_checks: JSON.stringify(checks.map((check) => ({
-          command: check.command.join(' '),
-          exit_code: check.code,
-          ...(check.code !== 0 && check.output ? { failure_output: clip(check.output, 3000) } : {}),
-        }))), check_failure: clip(checkFailure, 3000), context: reviewContext,
-      });
-      validation = statusResponse(await timedStep(`Stage ${stage.id}: validation (attempt ${attempt})`, () => invokeReadOnly(config.worker, validatorPrompt, repo)));
-      if (shouldRecoverReview(validation) && !sameAgent(config.worker, config.strong)) {
-        console.error(`[strata] recovering inconclusive validator review with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
-        try {
-          const recovered = statusResponse(await timedStep(`Stage ${stage.id}: recover inconclusive validation`, () => invokeReadOnly(config.strong, `${validatorPrompt}\n\nThe first validation response was malformed or inconclusive. Independently inspect the current worktree and evidence, then return a strict JSON decision with only concrete findings.`, repo)));
-          if (!shouldRecoverReview(recovered)) validation = recovered;
-        } catch (error) {
-          validation = { status: 'fail', findings: [
-            ...(validation.findings ?? []),
-            `Strong-agent validator recovery failed: ${errorMessage(error)}`,
-          ], summary: 'Validation did not complete successfully.' };
-        }
+      const validationResults = [];
+      for (let index = 0; index < tasks.length; index += 1) {
+        const task = tasks[index];
+        const scope = {
+          id: task.id ?? String(index + 1), task: task.task ?? task,
+          files: task.files ?? [], criteria: task.validation_criteria ?? stage.completion_criteria,
+        };
+        const validatorPrompt = promptFor('validator', {
+          task: 'Read-only validation of this task only. Check its assigned criteria and files against current code and applicable specifications. Do not review unrelated tasks. Re-read current files before reporting a defect; do not repeat earlier findings unless they still reproduce. Treat latest_checks as authoritative and cite exact current evidence for every finding. Return exactly one JSON object with status, findings, and summary. Do not edit files.',
+          contract, validation_scope: JSON.stringify(scope), implementation: implementations[index],
+          test_report: clip(testReport, 1200), latest_checks: JSON.stringify(checks.map((check) => ({
+            command: check.command.join(' '), exit_code: check.code,
+            ...(check.code !== 0 && check.output ? { failure_output: clip(check.output, 1800) } : {}),
+          }))), context: reviewContext,
+        });
+        const result = statusResponse(await timedStep(`Stage ${stage.id}: validate task ${index + 1}/${tasks.length}`, () => invokeReadOnly(config.worker, validatorPrompt, repo)));
+        validationResults.push({ ...result, findings: (result.findings ?? []).map((finding: string) => `Task ${scope.id}: ${finding}`) });
       }
+      validation = {
+        status: validationResults.every((result) => result.status === 'pass') ? 'pass' : 'fail',
+        findings: validationResults.flatMap((result) => result.findings),
+        summary: `${validationResults.filter((result) => result.status === 'pass').length}/${validationResults.length} task validations passed.`,
+      };
     } catch (error) {
       const message = error instanceof ReadOnlyMutationError ? error.message : `Validator process failed: ${errorMessage(error)}`;
       validation = { status: 'fail', findings: [message], summary: 'Validation did not complete successfully.' };
@@ -354,6 +328,62 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
   record.history.push({ type: 'archive', stage: stage.id, result: clip(archive, 4000) });
   stage.status = 'checkpoint_pending'; save();
   await timedStep(`Checkpoint stage ${stage.id}`, () => completeStage(repo, record, stage, save));
+}
+
+function taskBatches(tasks: any[]): number[][] {
+  const ids = new Map(tasks.map((task, index) => [String(task.id ?? index + 1), index]));
+  const dependencies = tasks.map((task) => (Array.isArray(task.depends_on) ? task.depends_on : []).map((id: unknown) => ids.get(String(id))));
+  if (dependencies.some((items) => items.some((index) => index === undefined))) {
+    return tasks.map((_, index) => [index]);
+  }
+  const pending = new Set(tasks.map((_, index) => index));
+  const complete = new Set<number>();
+  const batches: number[][] = [];
+  while (pending.size) {
+    const ready = [...pending].filter((index) => dependencies[index].every((dependency) => dependency !== undefined && complete.has(dependency)));
+    if (!ready.length) return tasks.map((_, index) => [index]);
+    const batch: number[] = [];
+    const claimedFiles = new Set<string>();
+    for (const index of ready) {
+      const files = Array.isArray(tasks[index].files) ? tasks[index].files.map(String) : [];
+      if (!files.length || files.some((file: string) => claimedFiles.has(file))) continue;
+      batch.push(index);
+      files.forEach((file: string) => claimedFiles.add(file));
+    }
+    if (!batch.length) batch.push(ready[0]);
+    batches.push(batch);
+    batch.forEach((index) => { pending.delete(index); complete.add(index); });
+  }
+  return batches;
+}
+
+async function implementTask(task: any, index: number, tasks: any[], previous: string[], findings: string, context: string, explore: string, contract: string, config: StrataConfig, repo: string, stageId: string): Promise<{ response: string; failure?: string }> {
+  const taskText = typeof task === 'string' ? task : String(task.task ?? '');
+  const implementationPrompt = promptFor('implementer', {
+    task: `Implement task ${index + 1} of ${tasks.length}. Edit only the files listed in task_scope. Inspect and build on the current worktree and supplied exploration. Complete the scoped changes; do not stop at a plan or claim. Return a concise summary of actual changes.`,
+    contract, implementation_task: taskText, task_scope: JSON.stringify({ files: task.files ?? [], depends_on: task.depends_on ?? [], validation_criteria: task.validation_criteria ?? [] }),
+    task_plan: JSON.stringify(tasks), stage_exploration: explore,
+    prior_task_results: clip(previous.join('\n\n'), 2500), previous_findings: clip(findings, 4000), context: clip(context, 6000),
+  });
+  try {
+    const response = await timedStep(`Stage ${stageId}: implement task ${index + 1}/${tasks.length}`, () => invoke(config.worker, implementationPrompt, repo));
+    if (!sameAgent(config.worker, config.strong)) {
+      const refusal = implementationRefusal(response);
+      if (refusal) return { response: clip(response, 4000), failure: `Worker did not implement task ${index + 1}: ${refusal}` };
+    }
+    return { response: clip(response, 4000) };
+  } catch (error) {
+    const failure = `Implementer task ${index + 1} failed on ${config.worker.provider}: ${errorMessage(error)}`;
+    if (sameAgent(config.worker, config.strong)) return { response: failure, failure };
+    console.error(`[strata] recovering failed implementer task ${index + 1} with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
+    try {
+      const recovery = await timedStep(`Stage ${stageId}: recover task ${index + 1}`, () => invoke(config.strong, `${implementationPrompt}\n\n## Recovery handoff\nThe configured worker failed before completing this task: ${errorMessage(error)}\nMake only the scoped changes, then summarize them.`, repo));
+      return { response: clip(recovery, 4000) };
+    } catch (recoveryError) {
+      const combined = `${failure}\nStrong-agent recovery also failed: ${errorMessage(recoveryError)}`;
+      return { response: combined, failure: combined };
+    }
+  }
 }
 
 async function completeStage(repo: string, record: RecordData, stage: Stage, save: () => void) {
@@ -687,6 +717,8 @@ function findingText(finding: unknown): string {
 
 function implementationRefusal(text: string): string | undefined {
   const patterns = [
+    /\b(?:i|we) (?:could not|couldn't|cannot|can't|am unable to|are unable to) (?:complete|implement|make|perform|carry out|finish)\b/i,
+    /\b(?:unable|not able) to (?:complete|implement|make|perform|carry out|finish) (?:the |this |that |requested )?(?:task|change|refactor|implementation|work)?\b/i,
     /\b(?:i|we) (?:can(?:not|'t)|cannot|don't have permission to|do not have permission to) (?:edit|modify|change|write|update|access)\b/i,
     /\b(?:the environment|this environment|the tooling|this tooling) (?:does not|doesn't) (?:provide|expose|allow) (?:a |direct )?(?:file[- ]edit|edit|write)\b/i,
     /\bplease (?:apply|make) (?:the |these |those )?(?:changes|edits|patch(?:es)?)\b/i,
