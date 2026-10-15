@@ -261,7 +261,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     const checkReview = checks.map((check) => ({
       command: check.command.join(' '),
       passed: check.code === 0,
-      ...(check.code !== 0 && check.output ? { output: clip(check.output, 1000) } : {}),
+      ...(check.code !== 0 && check.output ? { output: clip(check.output, 3000) } : {}),
     }));
     const reviewContext = clip(stageContext, 2000);
     let testReport: string;
@@ -307,8 +307,12 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     let validation: any;
     try {
       const validatorPrompt = promptFor('validator', {
-        task: 'Read-only validation. Compare the repository against the stage criteria and applicable specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail". Do not edit files.',
-        contract, implementation: implementationReview, test_report: clip(testReport, 1500), check_failure: clip(checkFailure, 2000), context: reviewContext,
+        task: 'Read-only validation. Compare the current worktree against each stage criterion and applicable spec. Re-read the current files before reporting a code or import finding; do not repeat findings from earlier attempts without verifying them now. Treat latest_checks as the authoritative result of the final automated check run: a passed check contradicts claims that the same check currently fails, though it does not prove unrelated behavioral criteria. Every finding must name the exact requirement and cite current evidence such as a file and line or a failing check and assertion. Do not report speculative or stale findings. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":["specific evidence-backed findings"],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail" and explain the uncertainty. Do not edit files.',
+        contract, implementation: implementationReview, test_report: clip(testReport, 1500), latest_checks: JSON.stringify(checks.map((check) => ({
+          command: check.command.join(' '),
+          exit_code: check.code,
+          ...(check.code !== 0 && check.output ? { failure_output: clip(check.output, 3000) } : {}),
+        }))), check_failure: clip(checkFailure, 3000), context: reviewContext,
       });
       validation = statusResponse(await timedStep(`Stage ${stage.id}: validation (attempt ${attempt})`, () => invokeReadOnly(config.worker, validatorPrompt, repo)));
       if (shouldRecoverReview(validation) && !sameAgent(config.worker, config.strong)) {
@@ -640,7 +644,7 @@ function statusResponse(text: string): any {
       return {
         ...parsed,
         status: String(parsed.status).toLowerCase(),
-        findings: Array.isArray(parsed.findings) ? parsed.findings.map(String) : [],
+        findings: Array.isArray(parsed.findings) ? parsed.findings.map(findingText) : [],
         summary: String(parsed.summary ?? ''),
       };
     }
@@ -667,6 +671,12 @@ function statusResponse(text: string): any {
     ? []
     : findingText.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean);
   return { status, findings, summary: values.get('summary') ?? '' };
+}
+
+function findingText(finding: unknown): string {
+  if (typeof finding === 'string') return finding;
+  try { return JSON.stringify(finding) ?? String(finding); }
+  catch { return String(finding); }
 }
 
 function implementationRefusal(text: string): string | undefined {

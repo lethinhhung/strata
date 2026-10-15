@@ -20,6 +20,7 @@ Check that stage changes work and do not introduce regressions.
 - Participate in the bounded implement/fix cycle defined in `specs/core.md`; report remaining concrete findings when its configured attempt limit is reached.
 - Do not edit files under `specs/`; report any apparent specification issue to the Validator and coordinators.
 - Report unrelated failures separately with evidence; do not claim success when a required check fails.
+- Return findings as strings, never nested objects. For each failure, include the exact command, assertion or diagnostic, and affected file when available. Base the report on the supplied latest check output and distinguish failures from earlier attempts from current failures.
 
 ## Handoff
 
