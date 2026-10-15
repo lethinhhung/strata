@@ -613,7 +613,13 @@ function promptFor(role: string, values: Record<string, string>): string {
   const roleFile = findRoleFile(role);
   const definition = roleFile ? fs.readFileSync(roleFile, 'utf8') : '';
   const coreFile = findCoreSpec();
-  const core = coreFile ? fs.readFileSync(coreFile, 'utf8') : '';
+  // Coordinators need the full orchestration contract to plan work across
+  // stages. Operational agents get the invariants that apply to every role;
+  // their role definition and handoff already carry the task-specific rules.
+  const planningRoles = new Set(['epic_coordinator', 'stage_coordinator']);
+  const core = planningRoles.has(role) && coreFile
+    ? fs.readFileSync(coreFile, 'utf8')
+    : 'The target repository and user epic are authoritative. Follow your role boundaries and the supplied task contract; do not invent requirements. Explore Agents and Validators are read-only. A stage passes only when its criteria, applicable checks, and validation are satisfied or an authorized blocker is recorded.';
   return `You are Strata's ${role.replaceAll('_', ' ')}. Follow the Strata workflow specification and this role definition.\n\n## Strata workflow\n${core}\n\n## Role definition\n${definition}\n\n${Object.entries(values).map(([key, value]) => `## ${key.replaceAll('_', ' ')}\n${value}`).join('\n\n')}`;
 }
 
