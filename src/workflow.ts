@@ -332,15 +332,15 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
 
 function taskBatches(tasks: any[]): number[][] {
   const ids = new Map(tasks.map((task, index) => [String(task.id ?? index + 1), index]));
-  const dependencies = tasks.map((task) => (Array.isArray(task.depends_on) ? task.depends_on : []).map((id: unknown) => ids.get(String(id))));
-  if (dependencies.some((items) => items.some((index) => index === undefined))) {
+  const dependencies: Array<Array<number | undefined>> = tasks.map((task: any) => (Array.isArray(task.depends_on) ? task.depends_on : []).map((id: unknown) => ids.get(String(id))));
+  if (dependencies.some((items: Array<number | undefined>) => items.some((index: number | undefined) => index === undefined))) {
     return tasks.map((_, index) => [index]);
   }
   const pending = new Set(tasks.map((_, index) => index));
   const complete = new Set<number>();
   const batches: number[][] = [];
   while (pending.size) {
-    const ready = [...pending].filter((index) => dependencies[index].every((dependency) => dependency !== undefined && complete.has(dependency)));
+    const ready = [...pending].filter((index: number) => dependencies[index].every((dependency: number | undefined) => dependency !== undefined && complete.has(dependency)));
     if (!ready.length) return tasks.map((_, index) => [index]);
     const batch: number[] = [];
     const claimedFiles = new Set<string>();
