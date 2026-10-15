@@ -294,7 +294,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
           }))), context: reviewContext,
         });
         const result = statusResponse(await timedStep(`Stage ${stage.id}: validate task ${index + 1}/${tasks.length}`, () => invokeReadOnly(config.worker, validatorPrompt, repo)));
-        validationResults.push({ ...result, findings: (result.findings ?? []).map((finding: string) => `Task ${scope.id}: ${finding}`) });
+        validationResults.push({ ...result, findings: result.findings ?? [] });
       }
       validation = {
         status: validationResults.every((result) => result.status === 'pass') ? 'pass' : 'fail',
