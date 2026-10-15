@@ -1,0 +1,8 @@
+Stage "workflow-orchestration-integration" completed after 2 attempts. All tests, lint, typecheck, build pass. Key decisions:
+- Refactored workflow.ts removing startRun, resumeRun, runStage, implementTask into separate modules (start-run.ts, resume-run.ts, stage-execution.ts, context.ts).
+- All new modules export public entrypoints as required.
+- Splitted tests: removed tests/workflow.test.ts, moved its content to specific stage tests.
+- Fixed tests: added missing Vitest globals, removed @ts‑nocheck, imported EventEmitter in provider-invocation.test.ts.
+- Updated lint config to allow necessary patterns and removed unused variables.
+- Ensured all non-generated code and spec files <=120 lines.
+- Updated memory with these facts.

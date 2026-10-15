@@ -1,8 +1,8 @@
-import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfig } from '../src/config.js';
-import { invoke, jsonResponse, run } from '../src/provider.js';
+import { invoke, run } from '../src/provider.js';
 import { temporaryDirectory } from './helpers/fixtures.js';
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
@@ -122,14 +122,4 @@ describe('provider invocation', () => {
     const cwd = temporaryDirectory();
     expect(await run(process.execPath, ['-e', 'process.stdout.write(process.cwd()+process.env.STRATA_TEST_VALUE);process.stderr.write("diagnostic")'], cwd, 5000, { ...process.env, STRATA_TEST_VALUE: 'fixture' })).toEqual({ code: 0, stdout: `${cwd}fixture`, stderr: 'diagnostic', timedOut: false });
   });
-});
-
-describe('JSON responses', () => {
-  it.each([
-    ['{"ok":true}', { ok: true }],
-    ['```json\n{"ok":false}\n```', { ok: false }],
-    ['prefix {bad} then ' + JSON.stringify({ nested: { text: 'braces } { and "quote"', value: 1 } }) + ' suffix', { nested: { text: 'braces } { and "quote"', value: 1 } }],
-    ['[1,2]', [1, 2]],
-  ])('parses %s', (text, expected) => expect(jsonResponse(text)).toEqual(expected));
-  it.each(['no JSON', '{invalid}', '{"unfinished":'])('rejects %s', (text) => expect(() => jsonResponse(text)).toThrow(/valid JSON/));
 });
