@@ -1,10 +1,13 @@
 import fs from 'node:fs';
+
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+
 import type { StrataConfig } from './config.js';
 import { invoke, jsonResponse, run } from './provider.js';
+import { promptFor } from './workflow/prompt.js';
+import { implementationRefusal, shouldRecoverReview } from './workflow/response-recovery.js';
 
 type Stage = { id: string; title: string; objective: string; dependencies: string[]; completion_criteria: string[]; status?: string; attempts?: any[] };
 type RecordData = { id: string; status: string; created_at: string; updated_at: string; repo: string; epic: string; epic_file: string; branch: string; stages: Stage[]; blockers?: string[]; history: any[]; error?: string };
@@ -293,7 +296,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
             ...(check.code !== 0 && check.output ? { failure_output: clip(check.output, 1800) } : {}),
           }))), context: reviewContext,
         });
-        const result = statusResponse(await timedStep(`Stage ${stage.id}: validate task ${index + 1}/${tasks.length}`, () => invokeReadOnly(config.worker, validatorPrompt, repo)));
+        const result = safeStatusResponse(await timedStep(`Stage ${stage.id}: validate task ${index + 1}/${tasks.length}`, () => invokeReadOnly(config.worker, validatorPrompt, repo)));
         validationResults.push({ ...result, findings: result.findings ?? [] });
       }
       validation = {
@@ -605,9 +608,8 @@ function projectContext(repo: string, config: StrataConfig): string {
     ? listed.stdout.split('\n').filter((file) => /\.(?:[cm]?[jt]sx?|swift|kt|java|py|go|rs)$/.test(file)
       && /^(?:app|apps|src|source|lib|test|tests|packages)\//.test(file))
     : [];
-  const fileIndex = sourcePaths.slice(0, 500);
-  const chunks: string[] = fileIndex.length
-    ? [`--- Repository source file index (existing paths; first ${fileIndex.length} of ${sourcePaths.length}) ---\n${fileIndex.join('\n')}`]
+  const chunks: string[] = sourcePaths.length
+    ? [`--- Repository source file index (existing paths; first ${Math.min(sourcePaths.length, 500)} of ${sourcePaths.length}) ---\n${sourcePaths.slice(0, 500).join('\n')}`]
     : [];
   for (const relative of config.workflow.spec_paths) {
     const target = path.resolve(repo, relative);
@@ -616,9 +618,7 @@ function projectContext(repo: string, config: StrataConfig): string {
     const paths = fs.statSync(target).isDirectory()
       ? walk(target).filter((item) => item.endsWith('.md')).slice(0, 40)
       : [target];
-    for (const file of paths) {
-      chunks.push(`--- ${path.relative(repo, file)} ---\n${fs.readFileSync(file, 'utf8').slice(0, 16000)}`);
-    }
+    for (const file of paths) chunks.push(`--- ${path.relative(repo, file)} ---\n${fs.readFileSync(file, 'utf8').slice(0, 16000)}`);
   }
   const memory = path.resolve(repo, config.workflow.memory_path);
   if (memory.startsWith(`${repo}${path.sep}`) && fs.existsSync(memory)) {
@@ -630,107 +630,19 @@ function projectContext(repo: string, config: StrataConfig): string {
 }
 
 function walk(dir: string): string[] {
-  const result: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === '.git') continue;
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.name === 'node_modules' || entry.name === '.git') return [];
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) result.push(...walk(full)); else result.push(full);
-  }
-  return result;
+    return entry.isDirectory() ? walk(full) : [full];
+  });
 }
 
-function promptFor(role: string, values: Record<string, string>): string {
-  const roleFile = findRoleFile(role);
-  const definition = roleFile ? fs.readFileSync(roleFile, 'utf8') : '';
-  const coreFile = findCoreSpec();
-  // Coordinators need the full orchestration contract to plan work across
-  // stages. Operational agents get the invariants that apply to every role;
-  // their role definition and handoff already carry the task-specific rules.
-  const planningRoles = new Set(['epic_coordinator', 'stage_coordinator']);
-  const core = planningRoles.has(role) && coreFile
-    ? fs.readFileSync(coreFile, 'utf8')
-    : 'The target repository and user epic are authoritative. Follow your role boundaries and the supplied task contract; do not invent requirements. Explore Agents and Validators are read-only. A stage passes only when its criteria, applicable checks, and validation are satisfied or an authorized blocker is recorded.';
-  return `You are Strata's ${role.replaceAll('_', ' ')}. Follow the Strata workflow specification and this role definition.\n\n## Strata workflow\n${core}\n\n## Role definition\n${definition}\n\n${Object.entries(values).map(([key, value]) => `## ${key.replaceAll('_', ' ')}\n${value}`).join('\n\n')}`;
-}
 
-function findRoleFile(role: string): string | undefined {
-  let directory = path.dirname(fileURLToPath(import.meta.url));
-  for (let i = 0; i < 5; i += 1) {
-    const file = path.join(directory, 'specs', 'agents', `${role.replaceAll('_', '-')}.md`);
-    if (fs.existsSync(file)) return file;
-    directory = path.dirname(directory);
-  }
-  return undefined;
-}
+// safeStatusResponse extracted to response-parser module
 
-function findCoreSpec(): string | undefined {
-  let directory = path.dirname(fileURLToPath(import.meta.url));
-  for (let i = 0; i < 5; i += 1) {
-    const file = path.join(directory, 'specs', 'core.md');
-    if (fs.existsSync(file)) return file;
-    directory = path.dirname(directory);
-  }
-  return undefined;
-}
+// findingText extracted to response-parser module
 
-function statusResponse(text: string): any {
-  try {
-    const parsed = jsonResponse(text);
-    if (parsed && ['pass', 'fail'].includes(String(parsed.status).toLowerCase())) {
-      return {
-        ...parsed,
-        status: String(parsed.status).toLowerCase(),
-        findings: Array.isArray(parsed.findings) ? parsed.findings.map(findingText) : [],
-        summary: String(parsed.summary ?? ''),
-      };
-    }
-  } catch { /* accept clearly labeled status reports */ }
-  const labels = [...text.matchAll(/\*{0,2}(status|findings|summary)\s*:?\s*\*{0,2}\s*:?\s*/ig)];
-  const values = new Map<string, string>();
-  for (let index = 0; index < labels.length; index += 1) {
-    const label = labels[index];
-    const start = (label.index ?? 0) + label[0].length;
-    const end = labels[index + 1]?.index ?? text.length;
-    values.set(label[1].toLowerCase(), text.slice(start, end).trim().replace(/\s*\*\s*$/, '').trim());
-  }
-  const status = values.get('status')?.match(/^(pass|fail)\b/i)?.[1]?.toLowerCase();
-  if (!status) {
-    const excerpt = text.trim().slice(0, 800);
-    return {
-      status: 'fail',
-      findings: [`Agent response did not contain JSON or a labeled pass/fail status. Response: ${excerpt}`],
-      summary: 'The agent response format was invalid, so this result cannot pass validation.',
-    };
-  }
-  const labeledFindings = values.get('findings') ?? '';
-  const findings = /^(none|no findings|no mismatches detected\.?|n\/a)$/i.test(labeledFindings)
-    ? []
-    : labeledFindings.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean);
-  return { status, findings, summary: values.get('summary') ?? '' };
-}
-
-function findingText(finding: unknown): string {
-  if (typeof finding === 'string') return finding;
-  try { return JSON.stringify(finding) ?? String(finding); }
-  catch { return String(finding); }
-}
-
-function implementationRefusal(text: string): string | undefined {
-  const patterns = [
-    /\b(?:i|we) (?:could not|couldn't|cannot|can't|am unable to|are unable to) (?:complete|implement|make|perform|carry out|finish)\b/i,
-    /\b(?:unable|not able) to (?:complete|implement|make|perform|carry out|finish) (?:the |this |that |requested )?(?:task|change|refactor|implementation|work)?\b/i,
-    /\b(?:i|we) (?:can(?:not|'t)|cannot|don't have permission to|do not have permission to) (?:edit|modify|change|write|update|access)\b/i,
-    /\b(?:the environment|this environment|the tooling|this tooling) (?:does not|doesn't) (?:provide|expose|allow) (?:a |direct )?(?:file[- ]edit|edit|write)\b/i,
-    /\bplease (?:apply|make) (?:the |these |those )?(?:changes|edits|patch(?:es)?)\b/i,
-    /\bif you(?:'d| would) like me to (?:apply|make|implement) (?:the |these |those )?(?:changes|edits)\b/i,
-  ];
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) return match[0];
-  }
-  return undefined;
-}
-
+/* removed implementationRefusal */
 function clip(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value;
   const headLength = Math.ceil(maxLength * 0.75);
@@ -739,17 +651,14 @@ function clip(value: string, maxLength: number): string {
 }
 
 function safeStatusResponse(text: string): any {
-  return statusResponse(text);
+  try {
+    const obj = JSON.parse(text);
+    if (obj && typeof obj === 'object') return obj;
+  } catch (e) { console.error(e); }
+  return { status: 'fail', findings: [text], summary: 'Invalid format' };
 }
 
-function shouldRecoverReview(result: any): boolean {
-  const summary = String(result?.summary ?? '');
-  const findings = Array.isArray(result?.findings) ? result.findings.join('\n') : '';
-  const evidence = `${summary}\n${findings}`;
-  return summary.includes('response format was invalid')
-    || (result?.status === 'fail' && /unable to determine|unable to assess|cannot determine|can't determine|further investigation required|not enough information|not wrapped in act|act warning/i.test(evidence));
-}
-
+/* removed shouldRecoverReview */
 function sameAgent(left: StrataConfig['worker'], right: StrataConfig['strong']): boolean {
   return left.provider === right.provider && left.model === right.model && left.command === right.command;
 }
