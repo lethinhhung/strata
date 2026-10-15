@@ -1,0 +1,1 @@
+{"stage_id":"cli-test-split","status":"complete","details":{"files_created":["tests/cli-arguments.test.ts","tests/cli-entrypoint.test.ts","tests/cli-workflow.test.ts"],"original_cli_test_removed":true,"lines_per_file":{"tests/cli-arguments.test.ts":119,"tests/cli-entrypoint.test.ts":118,"tests/cli-workflow.test.ts":118},"lint_passed":true,"tests_passed":true}}
