@@ -666,10 +666,10 @@ function statusResponse(text: string): any {
       summary: 'The agent response format was invalid, so this result cannot pass validation.',
     };
   }
-  const findingText = values.get('findings') ?? '';
-  const findings = /^(none|no findings|no mismatches detected\.?|n\/a)$/i.test(findingText)
+  const labeledFindings = values.get('findings') ?? '';
+  const findings = /^(none|no findings|no mismatches detected\.?|n\/a)$/i.test(labeledFindings)
     ? []
-    : findingText.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean);
+    : labeledFindings.split(/\r?\n/).map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(Boolean);
   return { status, findings, summary: values.get('summary') ?? '' };
 }
 
