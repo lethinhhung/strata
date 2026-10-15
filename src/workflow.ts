@@ -6,7 +6,10 @@ import { createHash } from 'node:crypto';
 
 import type { StrataConfig } from './config.js';
 import { invoke, jsonResponse, run } from './provider.js';
+import { finalizeRecord } from './workflow/checkpoint.js';
 import { promptFor } from './workflow/prompt.js';
+import { attemptFindings, completeStage } from './workflow/stage-completion.js';
+import { taskBatches } from './workflow/task-batches.js';
 import { implementationRefusal, shouldRecoverReview } from './workflow/response-recovery.js';
 
 type Stage = { id: string; title: string; objective: string; dependencies: string[]; completion_criteria: string[]; status?: string; attempts?: any[] };
@@ -333,32 +336,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
   await timedStep(`Checkpoint stage ${stage.id}`, () => completeStage(repo, record, stage, save));
 }
 
-function taskBatches(tasks: any[]): number[][] {
-  const ids = new Map(tasks.map((task, index) => [String(task.id ?? index + 1), index]));
-  const dependencies: Array<Array<number | undefined>> = tasks.map((task: any) => (Array.isArray(task.depends_on) ? task.depends_on : []).map((id: unknown) => ids.get(String(id))));
-  if (dependencies.some((items: Array<number | undefined>) => items.some((index: number | undefined) => index === undefined))) {
-    return tasks.map((_, index) => [index]);
-  }
-  const pending = new Set(tasks.map((_, index) => index));
-  const complete = new Set<number>();
-  const batches: number[][] = [];
-  while (pending.size) {
-    const ready = [...pending].filter((index: number) => dependencies[index].every((dependency: number | undefined) => dependency !== undefined && complete.has(dependency)));
-    if (!ready.length) return tasks.map((_, index) => [index]);
-    const batch: number[] = [];
-    const claimedFiles = new Set<string>();
-    for (const index of ready) {
-      const files = Array.isArray(tasks[index].files) ? tasks[index].files.map(String) : [];
-      if (!files.length || files.some((file: string) => claimedFiles.has(file))) continue;
-      batch.push(index);
-      files.forEach((file: string) => claimedFiles.add(file));
-    }
-    if (!batch.length) batch.push(ready[0]);
-    batches.push(batch);
-    batch.forEach((index) => { pending.delete(index); complete.add(index); });
-  }
-  return batches;
-}
+// TASK BATCHES MOVE
 
 async function implementTask(task: any, index: number, tasks: any[], previous: string[], findings: string, context: string, explore: string, contract: string, config: StrataConfig, repo: string, stageId: string): Promise<{ response: string; failure?: string }> {
   const taskText = typeof task === 'string' ? task : String(task.task ?? '');
@@ -389,26 +367,18 @@ async function implementTask(task: any, index: number, tasks: any[], previous: s
   }
 }
 
-async function completeStage(repo: string, record: RecordData, stage: Stage, save: () => void) {
-  await checkpoint(repo, stage);
-  stage.status = 'complete';
-  record.history.push({ type: 'stage_complete', stage: stage.id, at: new Date().toISOString() }); save();
-}
-
-function attemptFindings(attempt: any): string {
-  const sections: string[] = [];
-  for (const failure of attempt.implementation_failures ?? []) sections.push(`Implementer failure: ${String(failure)}`);
-  for (const check of attempt.checks ?? []) {
-    if (check.code !== 0) sections.push(`Check failed: ${(check.command ?? []).join(' ')}\n${String(check.output ?? '').slice(-3000)}`);
+function discoverChecks(repo: string): string[][] {
+  const packageFile = path.join(repo, 'package.json');
+  if (!fs.existsSync(packageFile)) return [];
+  let scripts: Record<string, string>;
+  try { scripts = JSON.parse(fs.readFileSync(packageFile, 'utf8'))?.scripts ?? {}; } catch { return []; }
+  const manager = fs.existsSync(path.join(repo, 'pnpm-lock.yaml')) ? 'pnpm' : fs.existsSync(path.join(repo, 'yarn.lock')) ? 'yarn' : fs.existsSync(path.join(repo, 'bun.lock')) ? 'bun' : 'npm';
+  const checks: string[][] = [];
+  const names = [scripts['test:ci'] ? 'test:ci' : scripts.test ? 'test' : '', 'lint', 'typecheck', 'build'].filter((name) => name && scripts[name]);
+  for (const name of names) {
+    checks.push(manager === 'npm' ? ['npm', 'run', name] : [manager, 'run', name]);
   }
-  for (const role of ['tester', 'validation']) {
-    const result = attempt[role];
-    if (!result || result.status === 'pass') continue;
-    const findings = Array.isArray(result.findings) ? result.findings.map(String).join('\n- ') : '';
-    sections.push(`${role} findings: ${findings || result.summary || JSON.stringify(result)}`);
-  }
-  if (!sections.length) sections.push('The previous implementation attempt did not pass. Inspect the saved attempt and verify the stage criteria against the current worktree.');
-  return sections.join('\n\n').slice(-12000);
+  return checks;
 }
 
 function errorMessage(error: unknown): string {
@@ -514,63 +484,6 @@ async function restoreWorkspace(repo: string, before: WorkspaceSnapshot, after: 
   } else if (after.index) {
     try { fs.unlinkSync(before.indexPath); } catch { /* index already absent */ }
   }
-}
-
-function discoverChecks(repo: string): string[][] {
-  const packageFile = path.join(repo, 'package.json');
-  if (!fs.existsSync(packageFile)) return [];
-  let scripts: Record<string, string>;
-  try { scripts = JSON.parse(fs.readFileSync(packageFile, 'utf8'))?.scripts ?? {}; } catch { return []; }
-  const manager = fs.existsSync(path.join(repo, 'pnpm-lock.yaml')) ? 'pnpm' : fs.existsSync(path.join(repo, 'yarn.lock')) ? 'yarn' : fs.existsSync(path.join(repo, 'bun.lock')) ? 'bun' : 'npm';
-  const checks: string[][] = [];
-  const names = [scripts['test:ci'] ? 'test:ci' : scripts.test ? 'test' : '', 'lint', 'typecheck', 'build'].filter((name) => name && scripts[name]);
-  for (const name of names) {
-    checks.push(manager === 'npm' ? ['npm', 'run', name] : [manager, 'run', name]);
-  }
-  return checks;
-}
-
-async function checkpoint(repo: string, stage: Stage) {
-  const status = await run('git', ['status', '--porcelain'], repo, 10000);
-  if (status.stdout.trim()) {
-    const added = await run('git', ['add', '-A'], repo, 10000);
-    if (added.code !== 0) throw new Error(`Stage checkpoint add failed: ${added.stderr}`);
-    const message = `strata: ${stage.title}`;
-    const commit = await run('git', ['commit', '-m', message], repo, 60000);
-    if (commit.code !== 0) throw new Error(`Stage checkpoint commit failed: ${commit.stderr}`);
-  }
-  const push = await pushCurrentBranch(repo);
-  if (push.code !== 0) throw new Error(`Stage ${stage.id} committed but push failed: ${push.stderr}`);
-}
-
-async function finalizeRecord(repo: string) {
-  const status = await run('git', ['status', '--porcelain'], repo, 10000);
-  if (status.stdout.trim()) {
-    await run('git', ['add', '-A'], repo, 10000);
-    const commit = await run('git', ['commit', '-m', 'strata: record completed run'], repo, 60000);
-    if (commit.code !== 0) throw new Error(`Final run checkpoint commit failed: ${commit.stderr}`);
-  }
-  const push = await pushCurrentBranch(repo);
-  if (push.code !== 0) throw new Error(`Final run push failed: ${push.stderr}`);
-}
-
-async function pushCurrentBranch(repo: string) {
-  const upstream = await run('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], repo, 10000);
-  if (upstream.code === 0 && upstream.stdout.trim()) return run('git', ['push'], repo, 120000);
-
-  const branchResult = await run('git', ['branch', '--show-current'], repo, 10000);
-  const branch = branchResult.stdout.trim();
-  if (!branch) return { code: 1, stdout: '', stderr: 'Cannot push because the current branch has no name.', timedOut: false };
-
-  const configuredRemote = await run('git', ['config', '--get', `branch.${branch}.pushRemote`], repo, 10000);
-  const defaultRemote = configuredRemote.code === 0
-    ? configuredRemote.stdout.trim()
-    : (await run('git', ['config', '--get', 'remote.pushDefault'], repo, 10000)).stdout.trim();
-  const remotes = await run('git', ['remote'], repo, 10000);
-  const availableRemotes = remotes.stdout.split('\n').map((remote) => remote.trim()).filter(Boolean);
-  const remote = defaultRemote || (availableRemotes.includes('origin') ? 'origin' : availableRemotes[0]);
-  if (!remote) return { code: 1, stdout: '', stderr: 'Cannot push because this repository has no configured remote.', timedOut: false };
-  return run('git', ['push', '--set-upstream', remote, branch], repo, 120000);
 }
 
 function relevantSourceContext(repo: string, stage: Stage): string {
