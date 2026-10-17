@@ -194,35 +194,53 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
   }, null, 2);
   const stageContext = `${clip(relevantSourceContext(repo, stage), 8000)}\n\n${clip(context, 5000)}`;
   const lastAttempt = stage.attempts?.at(-1);
-  let findings = lastAttempt && !lastAttempt.passed ? clip(attemptFindings(lastAttempt), 6000) : '';
-  const explore = clip(await timedStep(`Stage ${stage.id}: explore`, () => exploreWithRecovery(config, promptFor('explore_agent', {
-    task: 'Investigate relevant code, tests, conventions, dependencies, and project instructions for this stage. Read the stage-specific source excerpts and verify them against the repository. Read only; return JSON {"summary":"...","findings":[...],"files":[...],"uncertainties":[]}.', contract, context: stageContext,
-  }), repo)), 7000);
-  const taskPlan = jsonResponse(await timedStep(`Stage ${stage.id}: plan tasks`, () => invokeReadOnly(config.strong, promptFor('stage_coordinator', {
-    task: 'Turn this stage into ordered, small implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"id":"stable-id","task":"...","files":["path/to/file"],"depends_on":[],"validation_criteria":["..."]}],"validation_requirements":[...]}. Keep each task feasible in one handoff and focused on one function or one cohesive responsibility. For large refactors, assign one function per task and give each task a distinct destination file; defer shared exports and integration to a final task. Mark exact files each task may edit. Independent tasks with non-overlapping files and no dependencies will run in parallel, so do not mark tasks independent when they share files or depend on another task. Include a concrete focused check and validation criteria for each task. Do not bundle unrelated modules or repository-wide validation. If the stage is too broad to split safely into small tasks, recommend dependent stages. When prior findings are present, address them directly and do not repeat rejected approaches.',
-    contract, explore, prior_attempt_findings: findings, context: stageContext,
-  }), repo)));
-  let tasks: any[] = Array.isArray(taskPlan.implementation_tasks) && taskPlan.implementation_tasks.length ? taskPlan.implementation_tasks : [{ task: stage.objective }];
+  const resumedCheckRepair = lastAttempt && !lastAttempt.passed ? failedCheckRepairTask(repo, lastAttempt) : undefined;
+  let findings = lastAttempt && !lastAttempt.passed ? clip(attemptFindings(lastAttempt), 10000) : '';
+  const explore = resumedCheckRepair
+    ? '{"summary":"Skipped redundant exploration; resuming from concrete failed check diagnostics."}'
+    : clip(await timedStep(`Stage ${stage.id}: explore`, () => exploreWithRecovery(config, promptFor('explore_agent', {
+      task: 'Investigate relevant code, tests, conventions, dependencies, and project instructions for this stage. Read the stage-specific source excerpts and verify them against the repository. Read only; return JSON {"summary":"...","findings":[...],"files":[...],"uncertainties":[]}.', contract, context: stageContext,
+    }), repo)), 7000);
+  let tasks: any[];
+  if (resumedCheckRepair) {
+    tasks = [resumedCheckRepair];
+  } else {
+    const taskPlan = jsonResponse(await timedStep(`Stage ${stage.id}: plan tasks`, () => invokeReadOnly(config.strong, promptFor('stage_coordinator', {
+      task: 'Turn this stage into ordered, small implementation tasks. Do not implement. Return JSON {"implementation_tasks":[{"id":"stable-id","task":"...","files":["path/to/file"],"depends_on":[],"validation_criteria":["..."]}],"validation_requirements":[...]}. Keep each task feasible in one handoff and focused on one function or one cohesive responsibility. For large refactors, assign one function per task and give each task a distinct destination file; defer shared exports and integration to a final task. Mark exact files each task may edit. Independent tasks with non-overlapping files and no dependencies will run in parallel, so do not mark tasks independent when they share files or depend on another task. Include a concrete focused check and validation criteria for each task. Do not bundle unrelated modules or repository-wide validation. If the stage is too broad to split safely into small tasks, recommend dependent stages. When prior findings are present, address them directly and do not repeat rejected approaches.',
+      contract, explore, prior_attempt_findings: findings, context: stageContext,
+    }), repo)));
+    tasks = Array.isArray(taskPlan.implementation_tasks) && taskPlan.implementation_tasks.length ? taskPlan.implementation_tasks : [{ task: stage.objective }];
+  }
   const attempts = config.workflow.implement_fix_attempts;
   let passed = false;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     if (attempt > 1 && findings) {
-      try {
-        const repairPlan = jsonResponse(await timedStep(`Stage ${stage.id}: plan repairs`, () => invokeReadOnly(config.strong, promptFor('stage_coordinator', {
-          task: 'Review the prior implementation, tester, and validator findings. Clarify and route required repairs as ordered, small tasks. Do not implement. Return JSON {"implementation_tasks":[{"id":"stable-id","task":"...","files":["path/to/file"],"depends_on":[],"validation_criteria":["..."]}]}. Keep the original stage contract authoritative. Focus each task on one function or one cohesive responsibility, name exact files, and include a concrete focused check and validation criteria. Independent tasks with non-overlapping files and no dependencies may run in parallel. Do not repeat a failed broad handoff; if the repair is too broad, recommend dependent stage boundaries.',
-          contract, findings, previous_implementation_tasks: JSON.stringify(tasks), context: stageContext,
-        }), repo)));
-        if (Array.isArray(repairPlan.implementation_tasks) && repairPlan.implementation_tasks.length) tasks = repairPlan.implementation_tasks;
-      } catch (error) {
-        findings += `\nStage Coordinator repair planning failed; retrying the previous implementation tasks. ${errorMessage(error)}`;
+      const checkRepair = failedCheckRepairTask(repo, stage.attempts?.at(-1));
+      if (checkRepair) {
+        tasks = [checkRepair];
+      } else {
+        try {
+          const repairPlan = jsonResponse(await timedStep(`Stage ${stage.id}: plan repairs`, () => invokeReadOnly(config.strong, promptFor('stage_coordinator', {
+            task: 'Review the prior implementation, tester, and validator findings. Clarify and route required repairs as ordered, small tasks. Do not implement. Return JSON {"implementation_tasks":[{"id":"stable-id","task":"...","files":["path/to/file"],"depends_on":[],"validation_criteria":["..."]}]}. Keep the original stage contract authoritative. Recheck every claimed blocker against the current worktree; an obsolete or absent source file is not a blocker when the active checks point to existing files. Address all current, reproducible failures before secondary concerns. Focus each task on one function or one cohesive responsibility, name exact files, and include a concrete focused check and validation criteria. Independent tasks with non-overlapping files and no dependencies may run in parallel. Do not repeat a failed broad handoff; if the repair is too broad, recommend dependent stage boundaries.',
+            contract, findings: clip(findings, 10000), previous_implementation_tasks: JSON.stringify(tasks), context: stageContext,
+          }), repo)));
+          if (Array.isArray(repairPlan.implementation_tasks) && repairPlan.implementation_tasks.length) tasks = repairPlan.implementation_tasks;
+        } catch (error) {
+          findings += `\nStage Coordinator repair planning failed; retrying the previous implementation tasks. ${errorMessage(error)}`;
+        }
       }
     }
     const implementations: string[] = Array(tasks.length);
     const implementationFailures: string[] = [];
     const outcomes: Array<{ response: string; failure?: string }> = Array(tasks.length);
     for (const batch of taskBatches(tasks)) {
-      const prior = outcomes.filter(Boolean).map((result) => result.response);
-      const results = await Promise.all(batch.map((index) => implementTask(tasks[index], index, tasks, prior, findings, stageContext, explore, contract, config, repo, stage.id)));
+      const results = await Promise.all(batch.map((index) => {
+        const dependencyIds = new Set((Array.isArray(tasks[index].depends_on) ? tasks[index].depends_on : []).map(String));
+        const prior = tasks.flatMap((task, taskIndex) => dependencyIds.has(String(task.id ?? taskIndex + 1)) && outcomes[taskIndex]
+          ? [`Task ${String(task.id ?? taskIndex + 1)}: ${outcomes[taskIndex].response}`]
+          : []);
+        return implementTask(tasks[index], index, tasks, prior, findings, stageContext, explore, contract, config, repo, stage.id);
+      }));
       batch.forEach((index, offset) => { outcomes[index] = results[offset]; implementations[index] = results[offset].response; });
     }
     implementationFailures.push(...outcomes.flatMap((result) => result.failure ? [result.failure] : []));
@@ -286,14 +304,23 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
           files: task.files ?? [], criteria: task.validation_criteria ?? stage.completion_criteria,
         };
         const validatorPrompt = promptFor('validator', {
-          task: 'Read-only validation of this task only. Check its assigned criteria and files against current code and applicable specifications. Do not review unrelated tasks. Re-read current files before reporting a defect; do not repeat earlier findings unless they still reproduce. Treat latest_checks as authoritative and cite exact current evidence for every finding. Return exactly one JSON object with status, findings, and summary. Do not edit files.',
+          task: 'Read-only validation of this task only. Check its assigned criteria and files against current code and applicable specifications. Do not review unrelated tasks. Re-read current files before reporting a defect; do not repeat earlier findings unless they still reproduce. Treat latest_checks as authoritative and cite exact current evidence for every finding. Use only tools actually exposed in this session; never invent or call an unavailable tool. Do not run shell commands or edit files. If a check failed, use its supplied output as evidence. Return exactly one JSON object with status, findings, and summary.',
           contract, validation_scope: JSON.stringify(scope), implementation: implementations[index],
           test_report: clip(testReport, 1200), latest_checks: JSON.stringify(checks.map((check) => ({
             command: check.command.join(' '), exit_code: check.code,
             ...(check.code !== 0 && check.output ? { failure_output: clip(check.output, 1800) } : {}),
           }))), context: reviewContext,
         });
-        const result = statusResponse(await timedStep(`Stage ${stage.id}: validate task ${index + 1}/${tasks.length}`, () => invokeReadOnly(config.worker, validatorPrompt, repo)));
+        let validationText: string;
+        try {
+          validationText = await timedStep(`Stage ${stage.id}: validate task ${index + 1}/${tasks.length}`, () => invokeReadOnly(config.worker, validatorPrompt, repo));
+        } catch (error) {
+          if (error instanceof ReadOnlyMutationError || sameAgent(config.worker, config.strong)) throw error;
+          console.error(`[strata] recovering failed validator task ${index + 1} with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}: ${errorMessage(error)}`);
+          validationText = await timedStep(`Stage ${stage.id}: recover validator task ${index + 1}`, () => invokeReadOnly(config.strong,
+            `${validatorPrompt}\n\n## Recovery handoff\nThe configured validator failed before completing its read-only review: ${errorMessage(error)}\nReview the supplied implementation and latest check results. Use only tools actually exposed in this session; do not invent or call unavailable tools.`, repo));
+        }
+        const result = statusResponse(validationText);
         validationResults.push({ ...result, findings: result.findings ?? [] });
       }
       validation = {
@@ -359,22 +386,45 @@ function taskBatches(tasks: any[]): number[][] {
 
 async function implementTask(task: any, index: number, tasks: any[], previous: string[], findings: string, context: string, explore: string, contract: string, config: StrataConfig, repo: string, stageId: string): Promise<{ response: string; failure?: string }> {
   const taskText = typeof task === 'string' ? task : String(task.task ?? '');
-  const implementationPrompt = promptFor('implementer', {
-    task: `Implement task ${index + 1} of ${tasks.length}. Edit only the files listed in task_scope. Inspect and build on the current worktree and supplied exploration. Complete the scoped changes; do not stop at a plan or claim. Return a concise summary of actual changes.`,
-    contract, implementation_task: taskText, task_scope: JSON.stringify({ files: task.files ?? [], depends_on: task.depends_on ?? [], validation_criteria: task.validation_criteria ?? [] }),
-    task_plan: JSON.stringify(tasks), stage_exploration: explore,
-    prior_task_results: clip(previous.join('\n\n'), 2500), previous_findings: clip(findings, 4000), context: clip(context, 6000),
-  });
+  const taskFiles = Array.isArray(task.files) ? task.files.map(String) : [];
+  const dependencyIds = Array.isArray(task.depends_on) ? task.depends_on.map(String) : [];
+  const dependencyTasks = tasks.filter((candidate, candidateIndex) => dependencyIds.includes(String(candidate.id ?? candidateIndex + 1)));
+  const taskPlan = [task, ...dependencyTasks].map((item) => ({
+    id: String(item.id ?? (item === task ? index + 1 : 'dependency')),
+    task: String(item.task ?? item),
+    files: Array.isArray(item.files) ? item.files.map(String) : [],
+    depends_on: Array.isArray(item.depends_on) ? item.depends_on.map(String) : [],
+  }));
+  const isCheckRepair = task?.repair_check_failures === true;
+  const implementationValues: Record<string, string> = {
+    task: isCheckRepair
+      ? 'Repair the listed current check failures. Edit only task_scope.files. Read each implicated file and the exact diagnostic before changing it. Fix the underlying causes, preserve behavior, and run a focused check. Do not spend this repair on stage-planning claims or findings absent from these diagnostics.'
+      : 'Implement the assigned task. Edit only files in task_scope; if task_scope.files is empty, infer the smallest set of current files directly implicated by the task and findings. Inspect the current worktree before editing. On a repair attempt, address each concrete item in previous_findings, especially the exact failing check and file/line evidence. Make the smallest correction that resolves the reproduced failure. Run a focused check for each correction when possible; do not claim it is fixed without checking. If a finding is stale or cannot be reproduced, explain why and do not make unrelated changes. Complete the changes and return a concise summary.',
+    contract: isCheckRepair ? clip(contract, 1800) : contract,
+    implementation_task: taskText,
+    task_scope: JSON.stringify({ files: taskFiles, depends_on: dependencyIds, validation_criteria: task.validation_criteria ?? [] }),
+  };
+  if (!isCheckRepair) {
+    Object.assign(implementationValues, {
+      related_tasks: JSON.stringify(taskPlan),
+      stage_exploration: relevantExploration(explore, `${taskText}\n${taskFiles.join(' ')}`),
+      prior_task_results: clip(previous.join('\n\n'), 1500),
+      previous_findings: clip(findings, 8000),
+      context: clip(context, 2500),
+    });
+  }
+  const implementationPrompt = promptFor('implementer', implementationValues);
+  const implementationAgent = isCheckRepair ? config.strong : config.worker;
   try {
-    const response = await timedStep(`Stage ${stageId}: implement task ${index + 1}/${tasks.length}`, () => invoke(config.worker, implementationPrompt, repo));
+    const response = await timedStep(`Stage ${stageId}: implement task ${index + 1}/${tasks.length}`, () => invoke(implementationAgent, implementationPrompt, repo));
     if (!sameAgent(config.worker, config.strong)) {
       const refusal = implementationRefusal(response);
       if (refusal) return { response: clip(response, 4000), failure: `Worker did not implement task ${index + 1}: ${refusal}` };
     }
     return { response: clip(response, 4000) };
   } catch (error) {
-    const failure = `Implementer task ${index + 1} failed on ${config.worker.provider}: ${errorMessage(error)}`;
-    if (sameAgent(config.worker, config.strong)) return { response: failure, failure };
+    const failure = `Implementer task ${index + 1} failed on ${implementationAgent.provider}: ${errorMessage(error)}`;
+    if (sameAgent(implementationAgent, config.strong)) return { response: failure, failure };
     console.error(`[strata] recovering failed implementer task ${index + 1} with ${config.strong.provider}${config.strong.model ? ` / ${config.strong.model}` : ''}`);
     try {
       const recovery = await timedStep(`Stage ${stageId}: recover task ${index + 1}`, () => invoke(config.strong, `${implementationPrompt}\n\n## Recovery handoff\nThe configured worker failed before completing this task: ${errorMessage(error)}\nMake only the scoped changes, then summarize them.`, repo));
@@ -384,6 +434,26 @@ async function implementTask(task: any, index: number, tasks: any[], previous: s
       return { response: combined, failure: combined };
     }
   }
+}
+
+function relevantExploration(explore: string, task: string): string {
+  let parsed: any;
+  try { parsed = jsonResponse(explore); } catch { return clip(explore, 2500); }
+  const files = Array.isArray(parsed.files) ? parsed.files.map(String) : [];
+  const findings = Array.isArray(parsed.findings) ? parsed.findings.map((finding: any) => typeof finding === 'string' ? finding : JSON.stringify(finding)) : [];
+  const terms = new Set((task.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? []));
+  const matchingFindings = findings.filter((finding: string) => {
+    const lower = finding.toLowerCase();
+    return files.some((file: string) => lower.includes(file.toLowerCase()))
+      || [...terms].some((term) => lower.includes(term));
+  });
+  const selected = {
+    summary: parsed.summary,
+    relevant_files: files.filter((file: string) => task.toLowerCase().includes(file.toLowerCase()) || [...terms].some((term) => file.toLowerCase().includes(term))),
+    findings: (matchingFindings.length ? matchingFindings : findings).slice(0, 8),
+    uncertainties: Array.isArray(parsed.uncertainties) ? parsed.uncertainties.slice(0, 3) : [],
+  };
+  return clip(JSON.stringify(selected), 2500);
 }
 
 async function completeStage(repo: string, record: RecordData, stage: Stage, save: () => void) {
@@ -406,6 +476,84 @@ function attemptFindings(attempt: any): string {
   }
   if (!sections.length) sections.push('The previous implementation attempt did not pass. Inspect the saved attempt and verify the stage criteria against the current worktree.');
   return sections.join('\n\n').slice(-12000);
+}
+
+function failedCheckRepairTask(repo: string, attempt: any): any | undefined {
+  const failures = (attempt?.checks ?? []).filter((check: any) => check.code !== 0);
+  if (!failures.length) return undefined;
+  const outputs: string[] = failures.map((check: any) => String(check.output ?? ''));
+  const moduleCandidates = diagnosticModuleFiles(repo, outputs.join('\n'));
+  const reportedFiles = [...new Set([...outputs.flatMap((output) => diagnosticFiles(repo, output)), ...moduleCandidates])];
+  const sourceFiles = reportedFiles.filter((file) => !/^(?:tests?|__tests__)\//.test(file));
+  const files = sourceFiles.length ? sourceFiles : reportedFiles;
+  const evidence = `${compactCheckEvidence(failures)}${moduleCandidates.length ? `\n\nExisting source modules matching unresolved imports:\n${moduleCandidates.join('\n')}` : ''}`;
+  return {
+    id: 'repair-current-check-failures',
+    repair_check_failures: true,
+    task: `Repair every failure in the latest automated checks below. These current diagnostics are the source of truth for this repair. Inspect each named file, resolve the underlying issue, preserve the intended behavior, and run a focused check for each fix. For a broken relative import, use an existing matching source module when one is listed; correct the import path instead of creating a compatibility shim at the wrong location. This project uses NodeNext: TypeScript source imports must use .js specifiers even when the matching source file ends in .ts. Remove a .js shim that shadows a matching .ts module, and remove duplicate imports rather than adding another import. If a diagnostic no longer reproduces, state the evidence.\n\n${evidence}`,
+    files,
+    depends_on: [],
+    validation_criteria: ['Every failure listed in the latest automated check output is fixed or shown to be stale with current evidence.', 'The focused check for each fix passes.'],
+  };
+}
+
+function diagnosticModuleFiles(repo: string, output: string): string[] {
+  const sourceRoot = path.join(repo, 'src');
+  if (!fs.existsSync(sourceRoot)) return [];
+  const unresolved = new Set<string>();
+  const patterns = [
+    /Cannot find module ['"](\.\.?\/[^'"]+)['"]/g,
+    /TS2307: Cannot find module ['"](\.\.?\/[^'"]+)['"]/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of output.matchAll(pattern)) {
+      unresolved.add(path.basename(match[1]).replace(/\.(?:[cm]?[jt]sx?)$/, ''));
+    }
+  }
+  if (!unresolved.size) return [];
+  return walk(sourceRoot)
+    .filter((file) => unresolved.has(path.basename(file).replace(/\.(?:[cm]?[jt]sx?)$/, '')))
+    .sort((left, right) => Number(/\.(?:mts|cts|tsx?)$/i.test(right)) - Number(/\.(?:mts|cts|tsx?)$/i.test(left)) || left.localeCompare(right))
+    .map((file) => path.relative(repo, file));
+}
+
+function compactCheckEvidence(failures: any[]): string {
+  const entries: string[] = [];
+  const seen = new Set<string>();
+  for (const check of failures) {
+    // ANSI color codes begin with ESC, which ESLint's no-control-regex rejects in regex literals.
+    const ansiColorCode = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+    const output = String(check.output ?? '').replace(ansiColorCode, '');
+    const lines = output.split(/\r?\n/);
+    const relevant = new Set<number>();
+    const diagnostic = /(?:\berror\b|\bfailed?\b|cannot find module|cannot find name|referenceerror|typeerror|assertionerror|expected|received|\bTS\d+\b|FAIL\s|^\s*❯|^\s*>\s*\d+\s*\|)/i;
+    lines.forEach((line, index) => {
+      if (diagnostic.test(line)) {
+        for (let cursor = Math.max(0, index - 1); cursor <= Math.min(lines.length - 1, index + 2); cursor += 1) relevant.add(cursor);
+      }
+    });
+    const excerpt = relevant.size ? [...relevant].sort((a, b) => a - b).map((index) => lines[index]).join('\n') : clip(output.trim(), 1800);
+    const body = clip(excerpt.trim(), 1800);
+    const signature = body.replace(/\s+/g, ' ').trim();
+    if (!signature || seen.has(signature)) continue;
+    seen.add(signature);
+    entries.push(`Command: ${(check.command ?? []).join(' ')} (exit ${check.code})\n${body}`);
+  }
+  return clip(entries.join('\n\n'), 7500);
+}
+
+function diagnosticFiles(repo: string, output: string): string[] {
+  const found = new Set<string>();
+  const pattern = /((?:[A-Za-z]:)?(?:\/|\.\.?\/)?[\w.@/-]+\.(?:[cm]?[jt]sx?|json|vue|svelte))(?::\d+(?::\d+)?|\(\d+(?:,\d+)?\))?/g;
+  for (const match of output.matchAll(pattern)) {
+    const candidate = match[1];
+    if (candidate.split('/').includes('node_modules')) continue;
+    const absolute = path.resolve(path.isAbsolute(candidate) ? candidate : path.join(repo, candidate));
+    const relative = path.relative(repo, absolute);
+    if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) || !fs.existsSync(absolute)) continue;
+    found.add(relative);
+  }
+  return [...found];
 }
 
 function errorMessage(error: unknown): string {

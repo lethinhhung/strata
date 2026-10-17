@@ -156,7 +156,13 @@ describe('stages, failures, and resumable attempts', () => {
       expect(record.stages[0].attempts.map((attempt: { passed: boolean; attempt: number }) => [attempt.attempt, attempt.passed])).toEqual([[1, false], [2, false]]);
       expect(JSON.stringify(record.stages[0].attempts)).toContain(failure === 'check' ? 'controlled failure' : failure);
       expect(record.history.filter((event: { type: string }) => event.type === 'stage_attempt')).toHaveLength(2);
-      expect(calls.filter((call) => call.role === 'stage coordinator')[1].prompt).toContain(failure === 'check' ? 'controlled failure' : failure);
+      const coordinatorCalls = calls.filter((call) => call.role === 'stage coordinator');
+      if (failure === 'check') {
+        expect(coordinatorCalls).toHaveLength(1);
+        expect(calls.filter((call) => call.role === 'implementer')[1].prompt).toContain('controlled failure');
+      } else {
+        expect(coordinatorCalls[1].prompt).toContain(failure);
+      }
       expect(calls.some((call) => call.role === 'archivist')).toBe(false);
       expect(record.history.some((event: { type: string }) => ['archive', 'stage_complete'].includes(event.type))).toBe(false);
       expect(git(repo, 'rev-list', '--count', 'HEAD')).toBe('1');
