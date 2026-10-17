@@ -389,7 +389,7 @@ async function implementTask(task: any, index: number, tasks: any[], previous: s
   const taskFiles = Array.isArray(task.files) ? task.files.map(String) : [];
   const dependencyIds = Array.isArray(task.depends_on) ? task.depends_on.map(String) : [];
   const dependencyTasks = tasks.filter((candidate, candidateIndex) => dependencyIds.includes(String(candidate.id ?? candidateIndex + 1)));
-  const taskPlan = [task, ...dependencyTasks].map((item, itemIndex) => ({
+  const taskPlan = [task, ...dependencyTasks].map((item) => ({
     id: String(item.id ?? (item === task ? index + 1 : 'dependency')),
     task: String(item.task ?? item),
     files: Array.isArray(item.files) ? item.files.map(String) : [],
@@ -521,7 +521,9 @@ function compactCheckEvidence(failures: any[]): string {
   const entries: string[] = [];
   const seen = new Set<string>();
   for (const check of failures) {
-    const output = String(check.output ?? '').replace(/\u001b\[[0-9;]*m/g, '');
+    // ANSI color codes begin with ESC, which ESLint's no-control-regex rejects in regex literals.
+    const ansiColorCode = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+    const output = String(check.output ?? '').replace(ansiColorCode, '');
     const lines = output.split(/\r?\n/);
     const relevant = new Set<number>();
     const diagnostic = /(?:\berror\b|\bfailed?\b|cannot find module|cannot find name|referenceerror|typeerror|assertionerror|expected|received|\bTS\d+\b|FAIL\s|^\s*❯|^\s*>\s*\d+\s*\|)/i;
