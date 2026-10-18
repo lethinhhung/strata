@@ -124,6 +124,20 @@ describe('stages, failures, and resumable attempts', () => {
     expect(git(repo, 'log', '--format=%s')).toContain('strata: second');
     expect(fs.readFileSync(path.join(repo, 'memory', 'second.md'), 'utf8')).toContain('durable notes');
   });
+  it.each(['codex', 'opencode'] as const)('gives %s validators provider-appropriate read-only inspection guidance', async (provider) => {
+    const { repo } = repository();
+    const { calls } = await scriptedWorkflow();
+    const config = configuration(repo);
+    config.worker.provider = provider;
+    expect((await start(repo, config)).status).toBe('complete');
+    const validatorPrompt = calls.find((call) => call.role === 'validator')?.prompt ?? '';
+    if (provider === 'codex') {
+      expect(validatorPrompt).toContain('Use read-only shell commands such as rg, sed, cat, and find');
+      expect(validatorPrompt).toContain('Do not edit files or run project checks');
+    } else {
+      expect(validatorPrompt).toContain('Do not use shell or terminal tools, edit files, or run project checks');
+    }
+  });
   it.each([[['absent']], [['second']]])('rejects missing or incomplete dependency %s before implementation', async (dependencies) => {
     const { repo } = repository();
     const { calls } = await scriptedWorkflow([stage('first', dependencies), stage('second')]);

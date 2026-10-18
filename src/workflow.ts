@@ -304,7 +304,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
           files: task.files ?? [], criteria: task.validation_criteria ?? stage.completion_criteria,
         };
         const validatorPrompt = promptFor('validator', {
-          task: 'Read-only validation of this task only. Check its assigned criteria and files against current code and applicable specifications. Do not review unrelated tasks. Re-read current files before reporting a defect; do not repeat earlier findings unless they still reproduce. Treat latest_checks as authoritative and cite exact current evidence for every finding. Use only tools actually exposed in this session; never invent or call an unavailable tool. Do not run shell commands or edit files. If a check failed, use its supplied output as evidence. Return exactly one JSON object with status, findings, and summary.',
+          task: `Read-only validation of this task only. Check its assigned criteria and files against current code and applicable specifications. Do not review unrelated tasks. Re-read current files before reporting a defect; do not repeat earlier findings unless they still reproduce. Treat latest_checks as authoritative and cite exact current evidence for every finding. Use only tools actually exposed in this session; never invent or call an unavailable tool. ${validatorInspectionInstructions(config.worker.provider)} If a check failed, use its supplied output as evidence. Return exactly one JSON object with status, findings, and summary.`,
           contract, validation_scope: JSON.stringify(scope), implementation: implementations[index],
           test_report: clip(testReport, 1200), latest_checks: JSON.stringify(checks.map((check) => ({
             command: check.command.join(' '), exit_code: check.code,
@@ -606,6 +606,12 @@ async function invokeReadOnly(agent: StrataConfig['worker'] | StrataConfig['stro
   }
   if (rejected) throw failure;
   return response;
+}
+
+function validatorInspectionInstructions(provider: StrataConfig['worker']['provider']): string {
+  return provider === 'codex'
+    ? 'Use read-only shell commands such as rg, sed, cat, and find to inspect the current worktree; this session runs in a read-only sandbox. Do not edit files or run project checks.'
+    : 'Use the available read-only inspection tools to inspect the current worktree. Do not use shell or terminal tools, edit files, or run project checks.';
 }
 
 async function snapshotWorkspace(repo: string): Promise<WorkspaceSnapshot> {
