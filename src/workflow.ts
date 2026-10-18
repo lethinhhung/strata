@@ -192,7 +192,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
     },
     epic: record.epic,
   }, null, 2);
-  const stageContext = `${clip(relevantSourceContext(repo, stage), 8000)}\n\n${clip(context, 5000)}`;
+  const stageContext = stagePromptContext(repo, config, stage);
   const lastAttempt = stage.attempts?.at(-1);
   const resumedCheckRepair = lastAttempt && !lastAttempt.passed ? failedCheckRepairTask(repo, lastAttempt) : undefined;
   let findings = lastAttempt && !lastAttempt.passed ? clip(attemptFindings(lastAttempt), 10000) : '';
@@ -220,9 +220,10 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
         tasks = [checkRepair];
       } else {
         try {
+          const repairContext = stagePromptContext(repo, config, stage);
           const repairPlan = jsonResponse(await timedStep(`Stage ${stage.id}: plan repairs`, () => invokeReadOnly(config.strong, promptFor('stage_coordinator', {
             task: 'Review the prior implementation, tester, and validator findings. Clarify and route required repairs as ordered, small tasks. Do not implement. Return JSON {"implementation_tasks":[{"id":"stable-id","task":"...","files":["path/to/file"],"depends_on":[],"validation_criteria":["..."]}]}. Keep the original stage contract authoritative. Recheck every claimed blocker against the current worktree; an obsolete or absent source file is not a blocker when the active checks point to existing files. Address all current, reproducible failures before secondary concerns. Focus each task on one function or one cohesive responsibility, name exact files, and include a concrete focused check and validation criteria. Independent tasks with non-overlapping files and no dependencies may run in parallel. Do not repeat a failed broad handoff; if the repair is too broad, recommend dependent stage boundaries.',
-            contract, findings: clip(findings, 10000), previous_implementation_tasks: JSON.stringify(tasks), context: stageContext,
+            contract, findings: clip(findings, 10000), previous_implementation_tasks: JSON.stringify(tasks), context: repairContext,
           }), repo)));
           if (Array.isArray(repairPlan.implementation_tasks) && repairPlan.implementation_tasks.length) tasks = repairPlan.implementation_tasks;
         } catch (error) {
@@ -239,7 +240,8 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
         const prior = tasks.flatMap((task, taskIndex) => dependencyIds.has(String(task.id ?? taskIndex + 1)) && outcomes[taskIndex]
           ? [`Task ${String(task.id ?? taskIndex + 1)}: ${outcomes[taskIndex].response}`]
           : []);
-        return implementTask(tasks[index], index, tasks, prior, findings, stageContext, explore, contract, config, repo, stage.id);
+        const currentContext = stagePromptContext(repo, config, stage, tasks[index].files ?? []);
+        return implementTask(tasks[index], index, tasks, prior, findings, currentContext, explore, contract, config, repo, stage.id);
       }));
       batch.forEach((index, offset) => { outcomes[index] = results[offset]; implementations[index] = results[offset].response; });
     }
@@ -253,7 +255,7 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       passed: check.code === 0,
       ...(check.code !== 0 && check.output ? { output: clip(check.output, 3000) } : {}),
     }));
-    const reviewContext = clip(stageContext, 2000);
+    const reviewContext = clip(stagePromptContext(repo, config, stage), 7000);
     let testReport: string;
     const testerPrompt = promptFor('tester', {
       task: 'Review the implementation and automated check results already provided. Do not rerun the configured full check suite; Strata runs it automatically before and after this review. Run only a narrowly focused check if needed to diagnose a specific failure, and fix failures introduced by this implementation. Do not edit specs. Your entire response must be exactly one JSON object with shape {"status":"pass|fail","findings":[...],"summary":"..."}; no markdown, code fences, or surrounding prose. If uncertain, use status "fail".',
@@ -299,17 +301,18 @@ async function runStage(repo: string, record: RecordData, stage: Stage, config: 
       const validationResults = [];
       for (let index = 0; index < tasks.length; index += 1) {
         const task = tasks[index];
+        const validatorContext = clip(stagePromptContext(repo, config, stage, task.files ?? []), 7000);
         const scope = {
           id: task.id ?? String(index + 1), task: task.task ?? task,
           files: task.files ?? [], criteria: task.validation_criteria ?? stage.completion_criteria,
         };
         const validatorPrompt = promptFor('validator', {
-          task: 'Read-only validation of this task only. Check its assigned criteria and files against current code and applicable specifications. Do not review unrelated tasks. Re-read current files before reporting a defect; do not repeat earlier findings unless they still reproduce. Treat latest_checks as authoritative and cite exact current evidence for every finding. Use only tools actually exposed in this session; never invent or call an unavailable tool. Do not run shell commands or edit files. If a check failed, use its supplied output as evidence. Return exactly one JSON object with status, findings, and summary.',
+          task: `Read-only validation of this task only. Check its assigned criteria and files against current code and applicable specifications. Do not review unrelated tasks. The repository file index and source excerpts below were refreshed from the current worktree; if an assigned path is absent, search those current paths for its moved replacement before reporting a defect. Re-read current files before reporting a defect; do not repeat earlier findings unless they still reproduce. Treat latest_checks as authoritative and cite exact current evidence for every finding. Use only tools actually exposed in this session; never invent or call an unavailable tool. ${validatorInspectionInstructions(config.worker.provider)} If a check failed, use its supplied output as evidence. Return exactly one JSON object with status, findings, and summary.`,
           contract, validation_scope: JSON.stringify(scope), implementation: implementations[index],
           test_report: clip(testReport, 1200), latest_checks: JSON.stringify(checks.map((check) => ({
             command: check.command.join(' '), exit_code: check.code,
             ...(check.code !== 0 && check.output ? { failure_output: clip(check.output, 1800) } : {}),
-          }))), context: reviewContext,
+          }))), context: validatorContext,
         });
         let validationText: string;
         try {
@@ -608,6 +611,12 @@ async function invokeReadOnly(agent: StrataConfig['worker'] | StrataConfig['stro
   return response;
 }
 
+function validatorInspectionInstructions(provider: StrataConfig['worker']['provider']): string {
+  return provider === 'codex'
+    ? 'Use read-only shell commands such as rg, sed, cat, and find to inspect the current worktree; this session runs in a read-only sandbox. Do not edit files or run project checks.'
+    : 'Use the available read-only inspection tools to inspect the current worktree. Do not use shell or terminal tools, edit files, or run project checks.';
+}
+
 async function snapshotWorkspace(repo: string): Promise<WorkspaceSnapshot> {
   const listed = await run('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], repo, 10000);
   const files = new Map<string, WorkspaceFile>();
@@ -718,22 +727,24 @@ async function pushCurrentBranch(repo: string) {
   return run('git', ['push', '--set-upstream', remote, branch], repo, 120000);
 }
 
-function relevantSourceContext(repo: string, stage: Stage): string {
+function relevantSourceContext(repo: string, stage: Stage, requestedFiles: string[] = []): string {
   const listed = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: repo, encoding: 'utf8' });
   if (listed.status !== 0) return '--- Stage source excerpts ---\nUnable to list repository files.';
   const stopWords = new Set(['about', 'action', 'after', 'also', 'and', 'available', 'based', 'completion', 'criteria', 'current', 'from', 'into', 'must', 'only', 'repository', 'stage', 'that', 'their', 'this', 'through', 'users', 'using', 'when', 'with']);
   const terms = [...new Set(`${stage.id} ${stage.title} ${stage.objective} ${stage.completion_criteria.join(' ')}`
     .toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? [])].filter((term) => !stopWords.has(term));
-  const sourcePaths = listed.stdout.split('\n').filter((file) => /\.(?:[cm]?[jt]sx?|swift|kt|java|py|go|rs)$/.test(file)
+  const sourcePaths = listed.stdout.split('\n').filter((file) => fs.existsSync(path.join(repo, file)) && /\.(?:[cm]?[jt]sx?|swift|kt|java|py|go|rs)$/.test(file)
     && /^(?:app|apps|src|source|lib|test|tests|packages)\//.test(file));
-  const ranked = sourcePaths.map((file) => {
+  const requested = requestedFiles.filter((file) => sourcePaths.includes(file));
+  const ranked = sourcePaths.filter((file) => !requested.includes(file)).map((file) => {
     const normalized = file.toLowerCase();
     const score = terms.reduce((total, term) => total + (normalized.includes(term) ? (path.basename(normalized).includes(term) ? 3 : 1) : 0), 0);
     return { file, score };
   }).filter((item) => item.score > 0).sort((left, right) => right.score - left.score || left.file.localeCompare(right.file));
   const excerpts: string[] = [];
   let remaining = 10000;
-  for (const { file } of ranked.slice(0, 8)) {
+  const selected = [...requested, ...ranked.slice(0, Math.max(0, 8 - requested.length)).map(({ file }) => file)];
+  for (const file of selected) {
     if (remaining <= 0) break;
     try {
       const content = fs.readFileSync(path.join(repo, file), 'utf8');
@@ -750,7 +761,7 @@ function relevantSourceContext(repo: string, stage: Stage): string {
 function projectContext(repo: string, config: StrataConfig): string {
   const listed = spawnSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: repo, encoding: 'utf8' });
   const sourcePaths = listed.status === 0
-    ? listed.stdout.split('\n').filter((file) => /\.(?:[cm]?[jt]sx?|swift|kt|java|py|go|rs)$/.test(file)
+    ? listed.stdout.split('\n').filter((file) => fs.existsSync(path.join(repo, file)) && /\.(?:[cm]?[jt]sx?|swift|kt|java|py|go|rs)$/.test(file)
       && /^(?:app|apps|src|source|lib|test|tests|packages)\//.test(file))
     : [];
   const fileIndex = sourcePaths.slice(0, 500);
@@ -775,6 +786,12 @@ function projectContext(repo: string, config: StrataConfig): string {
     }
   }
   return chunks.join('\n\n').slice(0, 12000) || '(No project specs or rules were found.)';
+}
+
+function stagePromptContext(repo: string, config: StrataConfig, stage: Stage, files: string[] = []): string {
+  const freshSource = relevantSourceContext(repo, stage, files);
+  const freshProject = projectContext(repo, config);
+  return `${clip(freshSource, 8000)}\n\n${clip(freshProject, 5000)}`;
 }
 
 function walk(dir: string): string[] {
