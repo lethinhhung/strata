@@ -1,7 +1,7 @@
 {
   "name": "strata-cli",
   "version": "0.2.0",
-  "description": "Specification-led feature implementation workflow",
+  "description": "Cost-efficient specification-led implementation with a strong AI coordinator and low-cost worker agents",
   "type": "module",
   "bin": {
     "strata": "./dist/src/cli.js"
